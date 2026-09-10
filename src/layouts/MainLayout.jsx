@@ -1,29 +1,35 @@
 import React from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, DollarSign, User, Shield, LogOut } from 'lucide-react';
+import { LayoutDashboard, DollarSign, User, Shield, LogOut, CheckSquare, Activity } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 
 export default function MainLayout() {
   const location = useLocation();
   const isActive = (path) => location.pathname === path;
   
-  // Puxa o usuário e a função de logout do nosso cérebro Zustand
   const { user, logout } = useAuthStore();
+
+  // Extrai o primeiro nome do usuário caso ele exista
+  const firstName = user?.name ? user.name.split(' ')[0] : '';
 
   return (
     <div className="min-h-screen bg-dark-bg text-gray-200 flex flex-col">
       <header className="sticky top-0 z-40 bg-dark-bg/80 backdrop-blur-xl border-b border-dark-border shadow-[0_4px_30px_rgba(0,0,0,0.3)]">
         <div className="w-full max-w-[2560px] mx-auto px-4 md:px-8 h-16 flex items-center justify-between">
           
+          {/* Logo e Nome Dinâmico */}
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-orange-600 rounded-lg flex items-center justify-center font-black text-white shadow-md">
-              M
-            </div>
-            <span className="text-xl font-black text-white tracking-tighter">
+            <span className="text-xl font-black text-white tracking-tighter flex items-center">
               My<span className="text-orange-500">HUB</span>
+              {firstName && (
+                <span className="ml-2 pl-2 border-l border-white/20 text-xl font-black text-white tracking-tighter flex items-center">
+                  {firstName}
+                </span>
+              )}
             </span>
           </div>
 
+          {/* Navegação Central (Dock) com os novos módulos */}
           <nav className="flex items-center gap-2 bg-white/5 p-1.5 rounded-full border border-white/10 backdrop-blur-md shadow-inner">
             <Link 
               to="/dashboard" 
@@ -42,10 +48,29 @@ export default function MainLayout() {
               }`}
             >
               <DollarSign size={18} /> 
-              <span className="hidden md:inline">Financeiro</span>
+              <span className="hidden md:inline">Finanças</span>
             </Link>
 
-            {/* Renderiza o botão Admin APENAS se o cargo for admin */}
+            <Link 
+              to="/tarefas" 
+              className={`p-2 md:px-4 md:py-1.5 rounded-full text-sm font-medium flex items-center gap-2 transition-all ${
+                isActive('/tarefas') ? 'bg-blue-900 text-blue-100 shadow-md border border-blue-500/30' : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <CheckSquare size={18} /> 
+              <span className="hidden md:inline">Tarefas</span>
+            </Link>
+
+            <Link 
+              to="/fitness" 
+              className={`p-2 md:px-4 md:py-1.5 rounded-full text-sm font-medium flex items-center gap-2 transition-all ${
+                isActive('/fitness') ? 'bg-red-900 text-red-100 shadow-md border border-red-500/30' : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Activity size={18} /> 
+              <span className="hidden md:inline">Fitness</span>
+            </Link>
+
             {user?.role === 'admin' && (
               <Link 
                 to="/admin" 
@@ -59,6 +84,7 @@ export default function MainLayout() {
             )}
           </nav>
 
+          {/* Perfil do Usuário */}
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2 bg-white/5 p-1 pl-1 pr-4 rounded-full border border-white/10 backdrop-blur-md shadow-inner">
               <div className="w-8 h-8 rounded-full overflow-hidden border border-white/20 shrink-0">
@@ -72,15 +98,14 @@ export default function MainLayout() {
               </div>
               <div className="hidden md:block">
                 <p className="text-[11px] font-bold text-white leading-tight truncate max-w-25">
-                  {user?.name?.split(' ')[0] || 'Visitante'}
+                  {firstName || 'Visitante'}
                 </p>
                 <p className="text-[9px] text-orange-300 uppercase tracking-widest leading-tight">
-                  {user?.role === 'admin' ? 'Gestor' : 'Membro'}
+                  {user?.role === 'admin' ? 'Usuário' : 'Membro'}
                 </p>
               </div>
             </div>
             
-            {/* Botão de Logout */}
             <button 
               onClick={logout}
               className="p-2 bg-white/5 hover:bg-red-500/20 border border-transparent hover:border-red-500/30 rounded-full text-gray-400 hover:text-red-400 transition-all"
