@@ -21,7 +21,7 @@ export default function AuthScreen() {
           <h1 className="text-3xl font-black text-white tracking-tighter">
             My<span className="text-orange-500">HUB</span>
           </h1>
-          <p className="text-gray-400 text-sm mt-2">Acesse seu ambiente integrado</p>
+          <p className="text-gray-400 text-sm mt-2">Seu ambiente integrado pessoal som medida.</p>
         </div>
 
         <form onSubmit={handleLogin} className="space-y-5">
@@ -57,7 +57,7 @@ export default function AuthScreen() {
             type="submit" 
             className="w-full bg-orange-600 hover:bg-orange-500 text-white font-bold py-3 rounded-xl transition-all shadow-[0_0_15px_rgba(234,88,12,0.4)] hover:shadow-[0_0_25px_rgba(234,88,12,0.6)]"
           >
-            Entrar no Sistema
+            Acessar MyHUB
           </button>
         </form>
       </div>
