@@ -1,18 +1,23 @@
 import { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
+import { useAuthStore } from './store/useAuthStore';
 
-// Importação do nosso novo Layout
 import MainLayout from './layouts/MainLayout';
+import AuthScreen from './modules/auth/AuthScreen';
 
-// Lazy loading dos módulos
 const DashboardModule = lazy(() => import('./modules/dashboard/DashboardPage'));
 const FinanceModule = lazy(() => import('./modules/finance/FinancePage'));
 
 export default function App() {
+  const { user } = useAuthStore();
+
+  if (!user) {
+    return <AuthScreen />;
+  }
+
   return (
     <BrowserRouter>
-      {/* Sistema de Notificações Global isolado das rotas */}
       <Toaster 
         position="bottom-right"
         toastOptions={{
@@ -24,15 +29,14 @@ export default function App() {
         }} 
       />
 
-      {/* A tela de carregamento global agora engloba as rotas */}
+      {/* Alterado para tons de laranja (orange-400 e orange-500) */}
       <Suspense fallback={
-        <div className="min-h-screen bg-dark-bg flex flex-col items-center justify-center text-indigo-400">
-          <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <div className="min-h-screen bg-dark-bg flex flex-col items-center justify-center text-orange-400">
+          <div className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4"></div>
           <p className="font-bold animate-pulse">Carregando Módulo...</p>
         </div>
       }>
         <Routes>
-          {/* Todas as rotas filhas herdarão a casca do MainLayout */}
           <Route element={<MainLayout />}>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<DashboardModule />} />

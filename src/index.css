@@ -1,18 +1,19 @@
-/* Importação das regras base, componentes e utilitários do Tailwind */
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* src/index.css */
+@import "tailwindcss";
 
-/* Configuração base da página inteira */
-body {
-  background-color: #0B0F19; /* Nossa cor personalizada dark-bg */
-  color: #e5e7eb; /* Cor de texto cinza claro para contraste */
+/* Definindo as suas cores customizadas no padrão Tailwind v4 */
+@theme {
+  --color-dark-bg: #0B0F19;
+  --color-dark-card: rgba(11, 15, 25, 0.8);
+  --color-dark-border: rgba(255, 255, 255, 0.1);
 }
 
-/* 
-  Scrollbar customizada 
-  Deixa a barra de rolagem mais fina e elegante (estilo Mac/Mobile)
-*/
+body {
+  background-color: var(--color-dark-bg);
+  color: #e5e7eb;
+}
+
+/* Scrollbar customizada */
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -21,6 +22,6 @@ body {
   background: transparent;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: rgba(255, 255, 255, 0.1);
+  background-color: var(--color-dark-border);
   border-radius: 10px;
 }
