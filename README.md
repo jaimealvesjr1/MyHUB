@@ -1,16 +1,25 @@
-# React + Vite
+# MyHUB 🚀
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+MyHUB é um ecossistema pessoal integrado e modular, desenvolvido para centralizar e otimizar a gestão de performance pessoal. Inspirado em conceitos de aplicativos de alta performance, ele reúne finanças, produtividade e saúde em uma única interface moderna e responsiva.
 
-Currently, two official plugins are available:
+## 📦 Módulos Principais
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+*   **💰 Finanças Pessoais:** Controle de caixa simplificado, com entradas e saídas (executadas e previstas), além de resumos analíticos do histórico e previsões futuras.
+*   **✅ Gestão de Tarefas e Agenda:** Sistema de checklists e rotinas (diárias, semanais e mensais), focado em organização e produtividade.
+*   **🏋️ Fitness e Saúde:** Controle de fichas de treino, progressão de carga, histórico de dias de treino e acompanhamento de evolução física.
+*   **🛡️ Painel de Administração:** Controle de acesso baseado em cargos (RBAC), permitindo a gestão de usuários e níveis de permissão.
 
-## React Compiler
+## 🛠️ Tecnologias Utilizadas
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+*   **Frontend:** [React](https://reactjs.org/) + [Vite](https://vitejs.dev/)
+*   **Estilização:** [Tailwind CSS v4](https://tailwindcss.com/)
+*   **Ícones:** [Lucide React](https://lucide.dev/)
+*   **Gerenciamento de Estado:** [Zustand](https://github.com/pmndrs/zustand)
+*   **Roteamento:** [React Router DOM](https://reactrouter.com/)
+*   **Backend & Autenticação:** [Firebase](https://firebase.google.com/) (Auth, Firestore & Hosting)
 
-## Expanding the ESLint configuration
+## 🚀 Como Executar o Projeto Localmente
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+1. Clone o repositório:
+   ```bash
+   git clone [https://github.com/SeuUsuario/MyHUB.git](https://github.com/SeuUsuario/MyHUB.git)

@@ -3,9 +3,9 @@
 
 /* Definindo as suas cores customizadas no padrão Tailwind v4 */
 @theme {
-  --color-dark-bg: #0B0F19;
-  --color-dark-card: rgba(11, 15, 25, 0.8);
-  --color-dark-border: rgba(255, 255, 255, 0.1);
+  --color-dark-bg: #09090b; 
+  --color-dark-card: rgba(24, 24, 27, 0.5); /* Mais transparente para realçar o backdrop-blur */
+  --color-dark-border: rgba(255, 255, 255, 0.08); /* Bordas mais sutis e elegantes */
 }
 
 body {
