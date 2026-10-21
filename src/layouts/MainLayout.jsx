@@ -1,6 +1,8 @@
+// Arquivo: src/layouts/MainLayout.jsx
 import React from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, DollarSign, User, Shield, LogOut, CheckSquare, Activity } from 'lucide-react';
+// Trocamos CheckSquare e Activity pelo ícone Users
+import { LayoutDashboard, DollarSign, User, Shield, LogOut, Users } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 
 export default function MainLayout() {
@@ -8,8 +10,6 @@ export default function MainLayout() {
   const isActive = (path) => location.pathname === path;
   
   const { user, logout } = useAuthStore();
-
-  // Extrai o primeiro nome do usuário caso ele exista
   const firstName = user?.name ? user.name.split(' ')[0] : '';
 
   return (
@@ -17,7 +17,6 @@ export default function MainLayout() {
       <header className="sticky top-0 z-40 bg-dark-bg/80 backdrop-blur-xl border-b border-dark-border shadow-[0_4px_30px_rgba(0,0,0,0.3)]">
         <div className="w-full max-w-[2560px] mx-auto px-4 md:px-8 h-16 flex items-center justify-between">
           
-          {/* Logo e Nome Dinâmico */}
           <div className="flex items-center gap-3">
             <span className="text-xl font-black text-white tracking-tighter flex items-center">
               My<span className="text-orange-500">HUB</span>
@@ -29,7 +28,7 @@ export default function MainLayout() {
             </span>
           </div>
 
-          {/* Navegação Central (Dock) com os novos módulos */}
+          {/* DOCK CENTRAL ATUALIZADO */}
           <nav className="flex items-center gap-2 bg-white/5 p-1.5 rounded-full border border-white/10 backdrop-blur-md shadow-inner">
             <Link 
               to="/dashboard" 
@@ -48,27 +47,18 @@ export default function MainLayout() {
               }`}
             >
               <DollarSign size={18} /> 
-              <span className="hidden md:inline">Finanças</span>
+              <span className="hidden md:inline">Vendas</span>
             </Link>
 
+            {/* NOVO BOTÃO: CLIENTES */}
             <Link 
-              to="/tarefas" 
+              to="/clientes" 
               className={`p-2 md:px-4 md:py-1.5 rounded-full text-sm font-medium flex items-center gap-2 transition-all ${
-                isActive('/tarefas') ? 'bg-blue-900 text-blue-100 shadow-md border border-blue-500/30' : 'text-gray-400 hover:text-white hover:bg-white/5'
+                isActive('/clientes') ? 'bg-blue-900 text-blue-100 shadow-md border border-blue-500/30' : 'text-gray-400 hover:text-white hover:bg-white/5'
               }`}
             >
-              <CheckSquare size={18} /> 
-              <span className="hidden md:inline">Tarefas</span>
-            </Link>
-
-            <Link 
-              to="/fitness" 
-              className={`p-2 md:px-4 md:py-1.5 rounded-full text-sm font-medium flex items-center gap-2 transition-all ${
-                isActive('/fitness') ? 'bg-red-900 text-red-100 shadow-md border border-red-500/30' : 'text-gray-400 hover:text-white hover:bg-white/5'
-              }`}
-            >
-              <Activity size={18} /> 
-              <span className="hidden md:inline">Fitness</span>
+              <Users size={18} /> 
+              <span className="hidden md:inline">Clientes</span>
             </Link>
 
             {user?.role === 'admin' && (
@@ -84,7 +74,6 @@ export default function MainLayout() {
             )}
           </nav>
 
-          {/* Perfil do Usuário */}
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2 bg-white/5 p-1 pl-1 pr-4 rounded-full border border-white/10 backdrop-blur-md shadow-inner">
               <div className="w-8 h-8 rounded-full overflow-hidden border border-white/20 shrink-0">
