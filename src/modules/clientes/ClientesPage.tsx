@@ -14,7 +14,7 @@ export default function ClientesPage() {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [carregando, setCarregando] = useState(true);
 
-  // Estado para controlar qual cliente está sendo editado
+  // Estado para controlar qual cliente está a ser editado
   const [clienteEditando, setClienteEditando] = useState<Cliente | null>(null);
 
   const carregarLista = async () => {
@@ -35,14 +35,21 @@ export default function ClientesPage() {
     setCpf(cli.cpf);
     setTelefone(cli.telefone);
     
-    // Tratamento seguro para a data de nascimento
+    // Tratamento seguro e amigável para o TypeScript
     let dataFormatada = '';
     if (cli.dataNascimento) {
-      const d = cli.dataNascimento instanceof Date 
-        ? cli.dataNascimento 
-        : new Date((cli.dataNascimento as any).seconds ? (cli.dataNascimento as any).seconds * 1000 : cli.dataNascimento);
-      if (!isNaN(d.getTime())) {
-        dataFormatada = d.toISOString().split('T')[0];
+      // Se for uma string (formato YYYY-MM-DD padrão do input HTML)
+      if (typeof cli.dataNascimento === 'string') {
+        dataFormatada = cli.dataNascimento;
+      } else {
+        // Se for um Timestamp do Firebase (usamos 'any' para evitar o erro do TS)
+        const d = (cli.dataNascimento as any) instanceof Date 
+          ? (cli.dataNascimento as any) 
+          : new Date((cli.dataNascimento as any).seconds ? (cli.dataNascimento as any).seconds * 1000 : cli.dataNascimento);
+        
+        if (!isNaN(d.getTime())) {
+          dataFormatada = d.toISOString().split('T')[0];
+        }
       }
     }
     setDataNascimento(dataFormatada);
@@ -93,14 +100,14 @@ export default function ClientesPage() {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-        {/* Formulário de Cadastro / Edição */}
-        <div className={`xl:col-span-1 p-6 border rounded-xl shadow-lg h-fit transition-colors ${clienteEditando ? 'bg-blue-900/20 border-blue-500/50' : 'bg-dark-card border-dark-border'}`}>
+        {/* Formulário de Cadastro / Edição com identidade visual Ademicon (Vermelho) */}
+        <div className={`xl:col-span-1 p-6 border rounded-xl shadow-lg h-fit transition-colors ${clienteEditando ? 'bg-red-900/20 border-red-500/50' : 'bg-dark-card border-dark-border'}`}>
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-xl font-bold text-white">
               {clienteEditando ? 'Editar Cliente' : 'Novo Cadastro'}
             </h2>
             {clienteEditando && (
-              <button type="button" onClick={cancelarEdicao} className="text-xs text-gray-400 hover:text-white">
+              <button type="button" onClick={cancelarEdicao} className="text-xs text-gray-400 hover:text-white transition-colors">
                 Cancelar
               </button>
             )}
@@ -109,21 +116,21 @@ export default function ClientesPage() {
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1">Nome Completo</label>
-              <input type="text" value={nomeCompleto} onChange={(e) => setNomeCompleto(e.target.value)} disabled={isSubmitting} className="w-full px-4 py-2 bg-black/40 border border-white/10 rounded-md text-white focus:border-orange-500 outline-none" />
+              <input type="text" value={nomeCompleto} onChange={(e) => setNomeCompleto(e.target.value)} disabled={isSubmitting} className="w-full px-4 py-2 bg-black/40 border border-white/10 rounded-md text-white focus:border-red-500 outline-none" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1">CPF</label>
-              <input type="text" value={cpf} onChange={(e) => setCpf(mascaraCPF(e.target.value))} disabled={isSubmitting} className="w-full px-4 py-2 bg-black/40 border border-white/10 rounded-md text-white focus:border-orange-500 outline-none" />
+              <input type="text" value={cpf} onChange={(e) => setCpf(mascaraCPF(e.target.value))} disabled={isSubmitting} className="w-full px-4 py-2 bg-black/40 border border-white/10 rounded-md text-white focus:border-red-500 outline-none" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1">Telefone</label>
-              <input type="text" value={telefone} onChange={(e) => setTelefone(mascaraTelefone(e.target.value))} disabled={isSubmitting} className="w-full px-4 py-2 bg-black/40 border border-white/10 rounded-md text-white focus:border-orange-500 outline-none" />
+              <input type="text" value={telefone} onChange={(e) => setTelefone(mascaraTelefone(e.target.value))} disabled={isSubmitting} className="w-full px-4 py-2 bg-black/40 border border-white/10 rounded-md text-white focus:border-red-500 outline-none" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1">Data de Nascimento</label>
-              <input type="date" value={dataNascimento} onChange={(e) => setDataNascimento(e.target.value)} disabled={isSubmitting} className="w-full px-4 py-2 bg-black/40 border border-white/10 rounded-md text-white focus:border-orange-500 outline-none" />
+              <input type="date" value={dataNascimento} onChange={(e) => setDataNascimento(e.target.value)} disabled={isSubmitting} className="w-full px-4 py-2 bg-black/40 border border-white/10 rounded-md text-white focus:border-red-500 outline-none" />
             </div>
-            <button type="submit" disabled={isSubmitting} className="w-full bg-orange-600 text-white font-bold py-3 rounded-md hover:bg-orange-700 transition mt-2">
+            <button type="submit" disabled={isSubmitting} className="w-full bg-red-600 text-white font-bold py-3 rounded-md hover:bg-red-700 transition mt-2">
               {isSubmitting ? 'Salvando...' : clienteEditando ? 'Salvar Alterações' : 'Cadastrar'}
             </button>
           </form>
@@ -156,7 +163,7 @@ export default function ClientesPage() {
                       <td className="px-4 py-3 text-right">
                         <button 
                           onClick={() => iniciarEdicao(cli)}
-                          className="text-blue-400 hover:text-blue-300 font-bold text-xs bg-blue-500/10 px-3 py-1 rounded transition-colors"
+                          className="text-red-400 hover:text-red-300 font-bold text-xs bg-red-500/10 px-3 py-1 rounded transition-colors"
                         >
                           Editar
                         </button>

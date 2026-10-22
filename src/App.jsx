@@ -22,19 +22,17 @@ export default function App() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-dark-bg flex flex-col items-center justify-center text-orange-400">
-        <div className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+      <div className="min-h-screen bg-dark-bg flex flex-col items-center justify-center text-red-500">
+        <div className="w-12 h-12 border-4 border-red-600 border-t-transparent rounded-full animate-spin mb-4"></div>
         <p className="font-bold animate-pulse">Conectando ao banco...</p>
       </div>
     );
   }
 
-  // Se não houver usuário, redireciona para a tela de login
   if (!user) {
     return <AuthScreen />;
   }
 
-  // Estrutura de rotas do aplicativo
   return (
     <BrowserRouter>
       <Toaster 
@@ -43,14 +41,13 @@ export default function App() {
       />
 
       <Suspense fallback={
-        <div className="min-h-screen bg-dark-bg flex flex-col items-center justify-center text-orange-400">
-          <div className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <div className="min-h-screen bg-dark-bg flex flex-col items-center justify-center text-red-500">
+          <div className="w-12 h-12 border-4 border-red-600 border-t-transparent rounded-full animate-spin mb-4"></div>
           <p className="font-bold animate-pulse">Carregando Módulo...</p>
         </div>
       }>
         <Routes>
           <Route element={<MainLayout />}>
-            {/* Redireciona a raiz direto para o Dashboard */}
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<DashboardModule />} />
             <Route path="/financeiro" element={<VendasModule />} />
@@ -59,7 +56,6 @@ export default function App() {
           </Route>
         </Routes>
         
-        {/* Rodapé fixo do sistema */}
         <footer className="w-full border-t border-white/5 bg-black/40 py-6 mt-auto shrink-0 z-20 relative">
           <div className="w-full max-w-640 mx-auto px-4 md:px-8 2xl:px-12 min-[2000px]:px-16 flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="flex items-center hover:cursor-pointer group">
@@ -70,7 +66,7 @@ export default function App() {
               />
             </div>
             <div className="flex flex-col items-center md:items-end text-center md:text-right">
-              <span className="text-[9px] bg-white/5 border border-white/10 text-orange-400/80 px-2 py-0.5 rounded font-bold tracking-widest">
+              <span className="text-[9px] bg-white/5 border border-white/10 text-red-500/80 px-2 py-0.5 rounded font-bold tracking-widest">
                 v{APP_VERSION}
               </span>
               <p className="text-[11px] text-gray-500 font-medium">

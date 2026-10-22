@@ -110,7 +110,7 @@ export default function FormularioVenda({ onVendaSalva, vendaEditando, onCancela
   };
 
   return (
-    <div className={`w-full mx-auto p-6 md:p-8 border rounded-xl shadow-lg transition-colors ${vendaEditando ? 'bg-orange-900/20 border-orange-500/50' : 'bg-dark-card border-dark-border'}`}>
+    <div className={`w-full mx-auto p-6 md:p-8 border rounded-xl shadow-lg transition-colors ${vendaEditando ? 'bg-red-900/20 border-red-500/50' : 'bg-dark-card border-dark-border'}`}>
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold text-white">
           {vendaEditando ? 'Editando Venda' : 'Registrar Nova Venda'}
@@ -132,7 +132,7 @@ export default function FormularioVenda({ onVendaSalva, vendaEditando, onCancela
         <div className="md:col-span-6">
           <label className="block text-sm font-medium text-gray-300 mb-1">Cliente</label>
           <select
-            className="w-full px-4 py-2 bg-black/40 border border-white/10 rounded-md text-white focus:border-orange-500 outline-none"
+            className="w-full px-4 py-2 bg-black/40 border border-white/10 rounded-md text-white focus:border-red-500 outline-none"
             value={cliente}
             onChange={(e) => setCliente(e.target.value)}
             disabled={isSubmitting}
@@ -148,7 +148,7 @@ export default function FormularioVenda({ onVendaSalva, vendaEditando, onCancela
         <div className="md:col-span-3">
           <label className="block text-sm font-medium text-gray-300 mb-1">Tipo de Carta</label>
           <select
-            className="w-full px-4 py-2 bg-black/40 border border-white/10 rounded-md text-white focus:border-orange-500 outline-none"
+            className="w-full px-4 py-2 bg-black/40 border border-white/10 rounded-md text-white focus:border-red-500 outline-none"
             value={tipoCarta}
             onChange={(e) => setTipoCarta(e.target.value as TipoCartaConsorcio)}
             disabled={isSubmitting}
@@ -165,7 +165,7 @@ export default function FormularioVenda({ onVendaSalva, vendaEditando, onCancela
           <label className="block text-sm font-medium text-gray-300 mb-1">Valor da Carta</label>
           <input
             type="text"
-            className="w-full px-4 py-2 bg-black/40 border border-white/10 rounded-md text-white focus:border-orange-500 outline-none disabled:opacity-50"
+            className="w-full px-4 py-2 bg-black/40 border border-white/10 rounded-md text-white focus:border-red-500 outline-none disabled:opacity-50"
             value={valorCarta}
             onChange={(e) => setValorCarta(mascaraMoeda(e.target.value))}
             disabled={isSubmitting || !!vendaEditando}
@@ -178,7 +178,7 @@ export default function FormularioVenda({ onVendaSalva, vendaEditando, onCancela
           <label className="block text-sm font-medium text-gray-300 mb-1">Data da Venda</label>
           <input
             type="date"
-            className="w-full px-4 py-2 bg-black/40 border border-white/10 rounded-md text-white focus:border-orange-500 outline-none disabled:opacity-50"
+            className="w-full px-4 py-2 bg-black/40 border border-white/10 rounded-md text-white focus:border-red-500 outline-none disabled:opacity-50"
             value={dataVenda}
             onChange={(e) => setDataVenda(e.target.value)}
             disabled={isSubmitting || !!vendaEditando}
@@ -190,7 +190,7 @@ export default function FormularioVenda({ onVendaSalva, vendaEditando, onCancela
           <label className="block text-sm font-medium text-gray-300 mb-1">Grupo</label>
           <input 
             type="text" 
-            className="w-full px-4 py-2 bg-black/40 border border-white/10 rounded-md text-white focus:border-orange-500 outline-none" 
+            className="w-full px-4 py-2 bg-black/40 border border-white/10 rounded-md text-white focus:border-red-500 outline-none" 
             value={grupo} 
             onChange={(e) => setGrupo(e.target.value)} 
             disabled={isSubmitting} 
@@ -203,7 +203,7 @@ export default function FormularioVenda({ onVendaSalva, vendaEditando, onCancela
           <label className="block text-sm font-medium text-gray-300 mb-1">Cota</label>
           <input 
             type="text" 
-            className="w-full px-4 py-2 bg-black/40 border border-white/10 rounded-md text-white focus:border-orange-500 outline-none" 
+            className="w-full px-4 py-2 bg-black/40 border border-white/10 rounded-md text-white focus:border-red-500 outline-none" 
             value={cota} 
             onChange={(e) => setCota(e.target.value)} 
             disabled={isSubmitting} 
@@ -213,7 +213,7 @@ export default function FormularioVenda({ onVendaSalva, vendaEditando, onCancela
 
         {/* Botão Salvar: Ocupa as 6 colunas (100%) */}
         <div className="md:col-span-6 mt-2">
-          <button type="submit" disabled={isSubmitting} className="w-full bg-orange-600 text-white font-bold py-3 rounded-md hover:bg-orange-700 transition">
+          <button type="submit" disabled={isSubmitting} className="w-full bg-red-600 text-white font-bold py-3 rounded-md hover:bg-red-700 transition">
             {isSubmitting ? 'Processando...' : vendaEditando ? 'Salvar Alterações' : 'Registrar Venda e Projetar Comissões'}
           </button>
         </div>

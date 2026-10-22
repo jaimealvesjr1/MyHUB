@@ -1,7 +1,6 @@
 // Arquivo: src/layouts/MainLayout.jsx
 import React from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-// Trocamos CheckSquare e Activity pelo ícone Users
 import { LayoutDashboard, DollarSign, User, Shield, LogOut, Users } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 
@@ -19,7 +18,7 @@ export default function MainLayout() {
           
           <div className="flex items-center gap-3">
             <span className="text-xl font-black text-white tracking-tighter flex items-center">
-              My<span className="text-orange-500">HUB</span>
+              My<span className="text-red-600">HUB</span>
               {firstName && (
                 <span className="ml-2 pl-2 border-l border-white/20 text-xl font-black text-white tracking-tighter flex items-center">
                   {firstName}
@@ -28,12 +27,11 @@ export default function MainLayout() {
             </span>
           </div>
 
-          {/* DOCK CENTRAL ATUALIZADO */}
           <nav className="flex items-center gap-2 bg-white/5 p-1.5 rounded-full border border-white/10 backdrop-blur-md shadow-inner">
             <Link 
               to="/dashboard" 
               className={`p-2 md:px-4 md:py-1.5 rounded-full text-sm font-medium flex items-center gap-2 transition-all ${
-                isActive('/dashboard') ? 'bg-orange-900 text-orange-100 shadow-md border border-orange-500/30' : 'text-gray-400 hover:text-white hover:bg-white/5'
+                isActive('/dashboard') ? 'bg-red-900 text-red-100 shadow-md border border-red-500/30' : 'text-gray-400 hover:text-white hover:bg-white/5'
               }`}
             >
               <LayoutDashboard size={18} /> 
@@ -50,7 +48,6 @@ export default function MainLayout() {
               <span className="hidden md:inline">Vendas</span>
             </Link>
 
-            {/* NOVO BOTÃO: CLIENTES */}
             <Link 
               to="/clientes" 
               className={`p-2 md:px-4 md:py-1.5 rounded-full text-sm font-medium flex items-center gap-2 transition-all ${
@@ -80,7 +77,7 @@ export default function MainLayout() {
                 {user?.photoURL ? (
                   <img src={user?.photoURL} alt="Perfil" className="w-full h-full object-cover" />
                 ) : (
-                  <div className="w-full h-full bg-linear-to-br from-orange-500 to-red-600 flex items-center justify-center text-white font-bold">
+                  <div className="w-full h-full bg-linear-to-br from-red-600 to-red-900 flex items-center justify-center text-white font-bold">
                     <User size={16} />
                   </div>
                 )}
@@ -89,8 +86,8 @@ export default function MainLayout() {
                 <p className="text-[11px] font-bold text-white leading-tight truncate max-w-25">
                   {firstName || 'Visitante'}
                 </p>
-                <p className="text-[9px] text-orange-300 uppercase tracking-widest leading-tight">
-                  {user?.role === 'admin' ? 'Usuário' : 'Membro'}
+                <p className="text-[9px] text-red-500 uppercase tracking-widest leading-tight">
+                  {user?.role === 'admin' ? 'Usuário' : 'Consultor'}
                 </p>
               </div>
             </div>
