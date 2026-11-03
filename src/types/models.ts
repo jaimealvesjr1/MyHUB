@@ -37,3 +37,16 @@ export interface ParcelaComissao {
 export interface ConfiguracoesCRM {
   taxaComissaoAtual: number;
 }
+
+export type StatusProposta = 'Contato Inicial' | 'Proposta Enviada' | 'Em Negociação' | 'Ganho' | 'Perdido';
+
+export interface Proposta {
+  id?: string;               // Gerado pelo Firebase
+  userId: string;            // O ID do corretor (dono da proposta)
+  clienteNome: string;       // Nome do prospect/cliente
+  clienteId?: string;        // ID do cliente (opcional, caso já esteja cadastrado)
+  valorCredito: number;      // O "dinheiro na mesa" (Ex: Carta de 500 mil)
+  status: StatusProposta;    // Em que fase da venda estamos
+  dataCriacao: Date | any;   // Quando a proposta foi iniciada
+  observacoes?: string;      // Notas para você lembrar de detalhes
+}

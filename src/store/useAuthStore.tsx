@@ -29,13 +29,9 @@ export const useAuthStore = create<AuthStore>((set) => ({
 
   // Inicia o observador de login
   initializeAuth: () => {
-    // Tipamos o currentUser com o molde nativo do Firebase (FirebaseUser)
     onAuthStateChanged(auth, async (currentUser: FirebaseUser | null) => {
       if (currentUser) {
-        // Busca os dados adicionais do usuário (como o cargo/role) no Firestore
-        const userDocRef = doc(db, 'users', currentUser.uid);
-        const userDocSnap = await getDoc(userDocRef);
-
+        // Criamos o objeto básico do utilizador com os dados do Google
         let userData: UserData = {
           uid: currentUser.uid,
           email: currentUser.email,
@@ -44,15 +40,28 @@ export const useAuthStore = create<AuthStore>((set) => ({
           role: 'user' // Cargo padrão
         };
 
-        if (userDocSnap.exists()) {
-          // Se o usuário já existe no banco, mescla os dados e força a tipagem com 'as UserData'
-          userData = { ...userData, ...userDocSnap.data() } as UserData;
-        } else {
-          // Se é o primeiro login, salva o usuário novo no banco de dados
-          await setDoc(userDocRef, userData);
-        }
+        try {
+          // TENTATIVA: Busca os dados adicionais do usuário no Firestore
+          const userDocRef = doc(db, 'users', currentUser.uid);
+          const userDocSnap = await getDoc(userDocRef);
 
-        set({ user: userData, isLoading: false });
+          if (userDocSnap.exists()) {
+            // Se o usuário já existe no banco, mescla os dados
+            userData = { ...userData, ...userDocSnap.data() } as UserData;
+          } else {
+            // Se é o primeiro login, salva o usuário novo no banco de dados
+            await setDoc(userDocRef, userData);
+          }
+
+          set({ user: userData, isLoading: false });
+          
+        } catch (error) {
+          // PROTEÇÃO: Se falhar (ex: sem internet ou sem permissão nas regras), 
+          // não quebramos a app! Logamos o utilizador apenas com os dados básicos.
+          console.warn("Aviso: Não foi possível sincronizar o perfil com o Firestore. Entrando em modo básico.", error);
+          set({ user: userData, isLoading: false });
+        }
+        
       } else {
         set({ user: null, isLoading: false });
       }
@@ -62,11 +71,26 @@ export const useAuthStore = create<AuthStore>((set) => ({
   // Função para Login com Google
   loginWithGoogle: async () => {
     const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' }); 
+    
     try {
       await signInWithPopup(auth, provider);
-    } catch (error) {
-      console.error("Erro no login com Google:", error);
-      throw error; 
+    } catch (error: any) {
+      console.error("Erro detalhado do Firebase Auth:", error);
+      
+      switch (error.code) {
+        case 'auth/popup-closed-by-user':
+          throw new Error('O login foi cancelado antes de ser concluído.');
+        case 'auth/popup-blocked':
+          throw new Error('O seu navegador bloqueou a janela de login. Por favor, desative o bloqueador de pop-ups.');
+        case 'auth/network-request-failed':
+          throw new Error('Falha na ligação à internet. Verifique a sua rede e tente novamente.');
+        // NOVA LINHA ADICIONADA AQUI:
+        case 'auth/internal-error':
+          throw new Error('Erro interno de comunicação. Verifique se o seu navegador ou antivírus está a bloquear o pop-up de login.');
+        default:
+          throw new Error('Ocorreu um erro ao tentar iniciar sessão. Tente novamente mais tarde.');
+      }
     }
   },
 

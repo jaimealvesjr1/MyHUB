@@ -10,6 +10,7 @@ const DashboardModule = lazy(() => import('./modules/dashboard/DashboardPage'));
 const VendasModule = lazy(() => import('./modules/finance/FinancePage')); 
 const ClientesModule = lazy(() => import('./modules/clientes/ClientesPage'));
 const AdminModule = lazy(() => import('./modules/admin/AdminPage'));
+const LeadsModule = lazy(() => import('./modules/leads/LeadsPage'));
 
 const APP_VERSION = '1.0';
 
@@ -52,6 +53,7 @@ export default function App() {
             <Route path="/dashboard" element={<DashboardModule />} />
             <Route path="/financeiro" element={<VendasModule />} />
             <Route path="/clientes" element={<ClientesModule />} />
+            <Route path="/leads" element={<LeadsModule />} />
             <Route path="/admin" element={user?.role === 'admin' ? <AdminModule /> : <Navigate to="/dashboard" replace />} />
           </Route>
         </Routes>

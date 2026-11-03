@@ -1,7 +1,6 @@
-// Arquivo: src/layouts/MainLayout.jsx
 import React from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, DollarSign, User, Shield, LogOut, Users } from 'lucide-react';
+import { LayoutDashboard, DollarSign, User, Shield, LogOut, Users, Briefcase } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 
 export default function MainLayout() {
@@ -16,6 +15,7 @@ export default function MainLayout() {
       <header className="sticky top-0 z-40 bg-dark-bg/80 backdrop-blur-xl border-b border-dark-border shadow-[0_4px_30px_rgba(0,0,0,0.3)]">
         <div className="w-full max-w-[2560px] mx-auto px-4 md:px-8 h-16 flex items-center justify-between">
           
+          {/* LOGO */}
           <div className="flex items-center gap-3">
             <span className="text-xl font-black text-white tracking-tighter flex items-center">
               My<span className="text-red-600">HUB</span>
@@ -27,6 +27,7 @@ export default function MainLayout() {
             </span>
           </div>
 
+          {/* MENU DE NAVEGAÇÃO */}
           <nav className="flex items-center gap-2 bg-white/5 p-1.5 rounded-full border border-white/10 backdrop-blur-md shadow-inner">
             <Link 
               to="/dashboard" 
@@ -37,7 +38,17 @@ export default function MainLayout() {
               <LayoutDashboard size={18} /> 
               <span className="hidden md:inline">Início</span>
             </Link>
-            
+
+            <Link 
+              to="/leads" 
+              className={`p-2 md:px-4 md:py-1.5 rounded-full text-sm font-medium flex items-center gap-2 transition-all ${
+                isActive('/leads') ? 'bg-purple-900 text-purple-100 shadow-md border border-purple-500/30' : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Briefcase size={18} /> 
+              <span className="hidden md:inline">Leads</span>
+            </Link>
+
             <Link 
               to="/financeiro" 
               className={`p-2 md:px-4 md:py-1.5 rounded-full text-sm font-medium flex items-center gap-2 transition-all ${
@@ -71,14 +82,25 @@ export default function MainLayout() {
             )}
           </nav>
 
+          {/* PERFIL E SAIR */}
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2 bg-white/5 p-1 pl-1 pr-4 rounded-full border border-white/10 backdrop-blur-md shadow-inner">
               <div className="w-8 h-8 rounded-full overflow-hidden border border-white/20 shrink-0">
                 {user?.photoURL ? (
-                  <img src={user?.photoURL} alt="Perfil" className="w-full h-full object-cover" />
+                  <img 
+                    src={user.photoURL} 
+                    alt={`Foto de ${user?.name || 'Perfil'}`} 
+                    className="w-10 h-10 rounded-full object-cover border border-white/10"
+                    onError={(e) => {
+                      const target = e.currentTarget;
+                      target.onerror = null; // Evita loop infinito se a 2ª imagem também falhar
+                      const initial = user?.name ? user.name.charAt(0).toUpperCase() : 'U';
+                      target.src = `https://ui-avatars.com/api/?name=${initial}&background=ef4444&color=fff&bold=true`;
+                    }}
+                  />
                 ) : (
-                  <div className="w-full h-full bg-linear-to-br from-red-600 to-red-900 flex items-center justify-center text-white font-bold">
-                    <User size={16} />
+                  <div className="w-10 h-10 rounded-full bg-red-600 flex items-center justify-center text-white font-bold border border-white/10">
+                    {user?.name ? user.name.charAt(0).toUpperCase() : 'U'}
                   </div>
                 )}
               </div>

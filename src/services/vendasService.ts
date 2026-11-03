@@ -1,5 +1,5 @@
-import { collection, addDoc, getDocs, QueryDocumentSnapshot, DocumentData, doc, updateDoc } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { collection, addDoc, getDocs, QueryDocumentSnapshot, DocumentData, doc, updateDoc, query, where } from 'firebase/firestore';
+import { db, auth } from '../config/firebase'; // Importamos o auth para saber quem está logado
 import { VendaConsorcio, ParcelaComissao } from '../types/models';
 
 /**
@@ -7,38 +7,59 @@ import { VendaConsorcio, ParcelaComissao } from '../types/models';
  * O comando "async" indica que esta função vai demorar um tempo (tempo da internet).
  */
 export async function salvarVendaNoBanco(venda: VendaConsorcio, parcelas: ParcelaComissao[]) {
-  try {
-    // 1. Aponta para a coleção 'vendas' no Firebase e adiciona o documento
-    // O Firebase vai gerar um ID único automaticamente para esta venda
-    const vendaRef = await addDoc(collection(db, 'vendas'), venda);
+  // 1. Verificamos quem é o usuário logado no momento
+  const user = auth.currentUser;
+  
+  // Se não houver sessão, bloqueamos a ação imediatamente
+  if (!user) {
+    throw new Error("Operação negada: Usuário não autenticado.");
+  }
 
-    // 2. Agora precisamos salvar as 13 parcelas. 
-    // Usamos um laço de repetição para salvar uma por uma.
+  try {
+    // 2. Carimbamos a venda com o ID do corretor antes de enviar para o banco
+    const vendaComDono = {
+      ...venda,
+      userId: user.uid
+    };
+
+    // 3. Aponta para a coleção 'vendas' no Firebase e adiciona o documento
+    const vendaRef = await addDoc(collection(db, 'vendas'), vendaComDono);
+
+    // 4. Salvar as parcelas garantindo que elas também pertençam ao corretor
     for (const parcela of parcelas) {
-      // Carimbamos a parcela com o ID da venda que o Firebase acabou de criar.
-      // Assim, saberemos exatamente de qual venda essa comissão veio!
-      parcela.vendaId = vendaRef.id;
+      const parcelaComDono = {
+        ...parcela,
+        vendaId: vendaRef.id, // Amarra a parcela à venda gerada
+        userId: user.uid      // Amarra a parcela ao usuário logado
+      };
       
       // Salva a parcela na coleção 'parcelas'
-      await addDoc(collection(db, 'parcelas'), parcela);
+      await addDoc(collection(db, 'parcelas'), parcelaComDono);
     }
 
-    // Se chegar até aqui, tudo deu certo
     return true;
     
   } catch (erro) {
-    // Se a internet cair ou o banco rejeitar, capturamos o erro aqui
     console.error("Erro ao salvar no banco de dados:", erro);
     throw new Error("Não foi possível salvar a venda. Tente novamente.");
   }
 }
 
 /**
- * Busca todas as parcelas de comissão salvas na coleção 'parcelas'.
+ * Busca todas as parcelas de comissão salvas na coleção 'parcelas' que pertencem ao usuário logado.
  */
 export async function buscarParcelasDoBanco(): Promise<ParcelaComissao[]> {
+  const user = auth.currentUser;
+  if (!user) return []; // Retorna lista vazia se não estiver logado
+
   try {
-    const querySnapshot = await getDocs(collection(db, 'parcelas'));
+    // Criamos uma consulta (query) filtrando apenas as parcelas do usuário ativo
+    const q = query(
+      collection(db, 'parcelas'),
+      where('userId', '==', user.uid)
+    );
+
+    const querySnapshot = await getDocs(q);
     const listaParcelas: ParcelaComissao[] = [];
 
     querySnapshot.forEach((doc: QueryDocumentSnapshot<DocumentData>) => {
@@ -48,8 +69,6 @@ export async function buscarParcelasDoBanco(): Promise<ParcelaComissao[]> {
       } as ParcelaComissao);
     });
 
-    // Opcional: Aqui poderíamos ordenar as parcelas por data, 
-    // mas o Firebase já as retorna na ordem em que foram salvas.
     return listaParcelas;
   } catch (erro) {
     console.error("Erro ao buscar as parcelas:", erro);
@@ -58,11 +77,20 @@ export async function buscarParcelasDoBanco(): Promise<ParcelaComissao[]> {
 }
 
 /**
- * Busca o histórico completo de vendas para gerar as métricas do Dashboard.
+ * Busca o histórico completo de vendas do usuário logado para gerar as métricas do Dashboard.
  */
 export async function buscarVendasDoBanco(): Promise<VendaConsorcio[]> {
+  const user = auth.currentUser;
+  if (!user) return []; // Retorna lista vazia por segurança
+
   try {
-    const querySnapshot = await getDocs(collection(db, 'vendas'));
+    // Consulta restrita: traz apenas as vendas onde o campo userId corresponde ao usuário atual
+    const q = query(
+      collection(db, 'vendas'),
+      where('userId', '==', user.uid)
+    );
+
+    const querySnapshot = await getDocs(q);
     const listaVendas: VendaConsorcio[] = [];
 
     querySnapshot.forEach((doc: QueryDocumentSnapshot<DocumentData>) => {
@@ -82,14 +110,17 @@ export async function buscarVendasDoBanco(): Promise<VendaConsorcio[]> {
 /**
  * Atualiza os dados de uma venda existente no Firebase.
  * Restrição Educativa: Neste momento, estamos atualizando apenas os dados cadastrais da venda (Cota, Grupo, etc).
- * Alterar o valor exigiria recalcular e reescrever as 13 parcelas no banco.
  */
 export async function atualizarVendaNoBanco(idVenda: string, dadosAtualizados: Partial<VendaConsorcio>): Promise<void> {
+  const user = auth.currentUser;
+  if (!user) throw new Error("Usuário não autenticado.");
+
   try {
     // Aponta especificamente para o documento que tem este ID dentro da coleção 'vendas'
     const vendaRef = doc(db, 'vendas', idVenda);
     
-    // Envia apenas os dados que foram modificados
+    // Envia apenas os dados que foram modificados.
+    // As regras de segurança do Firebase (backend) irão bloquear a ação se este documento não pertencer ao usuário.
     await updateDoc(vendaRef, dadosAtualizados);
   } catch (erro) {
     console.error("Erro ao atualizar a venda:", erro);

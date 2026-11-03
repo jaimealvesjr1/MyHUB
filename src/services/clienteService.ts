@@ -1,52 +1,76 @@
-import { collection, addDoc, getDocs, QueryDocumentSnapshot, DocumentData, doc, updateDoc } from 'firebase/firestore';
-import { db } from '../config/firebase';
+// Arquivo: src/services/clienteService.ts
+import { collection, query, where, getDocs, addDoc, doc, updateDoc } from 'firebase/firestore';
+import { db, auth } from '../config/firebase';
 import { Cliente } from '../types/models';
 
 /**
- * Função responsável por salvar um novo cliente no banco de dados.
+ * Busca todos os clientes pertencentes ao corretor logado.
  */
-export async function salvarClienteNoBanco(cliente: Cliente): Promise<string> {
-  try {
-    const docRef = await addDoc(collection(db, 'clientes'), cliente);
-    return docRef.id;
-  } catch (erro) {
-    console.error("Erro ao salvar o cliente:", erro);
-    throw new Error("Não foi possível salvar o cliente no momento.");
-  }
-}
+export const buscarClientes = async (): Promise<Cliente[]> => {
+  const user = auth.currentUser;
+  
+  if (!user) return [];
 
-/**
- * Busca todos os clientes cadastrados na coleção 'clientes' do Firebase.
- */
-export async function buscarClientes(): Promise<Cliente[]> {
   try {
-    const querySnapshot = await getDocs(collection(db, 'clientes'));
-    const listaClientes: Cliente[] = [];
+    const q = query(
+      collection(db, 'clientes'),
+      where('userId', '==', user.uid)
+    );
 
-    // Tipamos o 'doc' explicitamente para resolver o erro 7006
-    querySnapshot.forEach((doc: QueryDocumentSnapshot<DocumentData>) => {
-      listaClientes.push({
-        id: doc.id,
-        ...doc.data()
-      } as Cliente);
+    const querySnapshot = await getDocs(q);
+    const clientes: Cliente[] = [];
+    
+    querySnapshot.forEach((doc) => {
+      clientes.push({ id: doc.id, ...doc.data() } as Cliente);
     });
-
-    return listaClientes;
-  } catch (erro) {
-    console.error("Erro ao buscar clientes:", erro);
+    
+    return clientes;
+  } catch (error) {
+    console.error("Erro ao buscar clientes:", error);
     return [];
   }
-}
+};
 
 /**
- * Atualiza os dados de um cliente existente no Firebase.
+ * Cria um novo cliente, carimbando-o com o ID do corretor logado.
  */
-export async function atualizarClienteNoBanco(idCliente: string, dadosAtualizados: Partial<Cliente>): Promise<void> {
+export const salvarClienteNoBanco = async (dadosCliente: Omit<Cliente, 'id'>) => {
+  const user = auth.currentUser;
+  
+  if (!user) throw new Error('Operação negada: Utilizador não autenticado.');
+
+  const clienteComDono = {
+    ...dadosCliente,
+    userId: user.uid,
+    dataCadastro: new Date()
+  };
+
   try {
+    const docRef = await addDoc(collection(db, 'clientes'), clienteComDono);
+    return docRef.id;
+  } catch (error) {
+    console.error("Erro ao salvar cliente:", error);
+    throw error;
+  }
+};
+
+/**
+ * NOVA FUNÇÃO: Atualiza os dados de um cliente existente.
+ * Esta era a função que estava a causar o erro no ClientesPage.tsx.
+ */
+export const atualizarClienteNoBanco = async (idCliente: string, dadosAtualizados: Partial<Cliente>): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user) throw new Error("Usuário não autenticado.");
+
+  try {
+    // Aponta para o documento específico do cliente na coleção 'clientes'
     const clienteRef = doc(db, 'clientes', idCliente);
+    
+    // As regras de segurança do Firestore garantirão que esta ação 
+    // só será aceite se o 'userId' do documento for igual ao 'user.uid'
     await updateDoc(clienteRef, dadosAtualizados);
-  } catch (erro) {
-    console.error("Erro ao atualizar o cliente:", erro);
+  } catch (error) {
+    console.error("Erro ao atualizar o cliente:", error);
     throw new Error("Não foi possível atualizar os dados do cliente.");
   }
-}
+};
