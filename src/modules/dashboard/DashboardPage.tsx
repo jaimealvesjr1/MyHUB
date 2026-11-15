@@ -1,7 +1,13 @@
-// Arquivo: src/modules/dashboard/DashboardPage.tsx
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
-import { TrendingUp, Target, Award, Calendar, BarChart3, Users, Crown, Zap, Clock, Edit2, Check, Gift, Briefcase } from 'lucide-react';
+import {
+  TrendingUp, Target, Award, Calendar, BarChart3, Users,
+  Crown, Zap, Clock, Edit2, Check, Gift, Briefcase,
+  Coins, ArrowUpRight
+} from 'lucide-react';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '../../config/firebase';
 import { buscarVendasDoBanco, buscarParcelasDoBanco } from '../../services/vendasService';
 import { buscarClientes } from '../../services/clienteService';
 import { Cliente } from '../../types/models';
@@ -22,6 +28,7 @@ type Periodo = 'mensal' | 'trimestral' | 'semestral' | 'anual';
 
 export default function DashboardPage() {
   const { user } = useAuthStore();
+  const navigate = useNavigate();
   const firstName = user?.name ? user.name.split(' ')[0] : 'Corretor';
 
   const [carregando, setCarregando] = useState(true);
@@ -31,6 +38,15 @@ export default function DashboardPage() {
   const [recebimentoProximoMes, setRecebimentoProximoMes] = useState(0);
   const [projecaoMensal, setProjecaoMensal] = useState<{mes: string, valor: number}[]>([]);
   const [proximosAniversariantes, setProximosAniversariantes] = useState<ClienteComNiver[]>([]);
+
+  // Novo Estado: Dinheiro na Mesa (Negociações ativas no funil)
+  const [dinheiroNaMesa, setDinheiroNaMesa] = useState({
+    total: 0,
+    emProposta: 0,
+    qtdProposta: 0,
+    emFechamento: 0,
+    qtdFechamento: 0,
+  });
 
   const [acumulado, setAcumulado] = useState({
     mensal: { volume: 0, salario: 0, comissaoGeral: 0, vendas: 0, clientes: 0, maiorVolume: 0, menorVolume: 0, maiorSalario: 0, menorSalario: 0 },
@@ -63,6 +79,12 @@ export default function DashboardPage() {
 
   const formatarValor = (valor: number) => valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
+  const moedaTextoParaNumero = (valorFormatado?: string) => {
+    if (!valorFormatado) return 0;
+    const limpo = String(valorFormatado).replace(/[R$\s.]/g, '').replace(',', '.');
+    return parseFloat(limpo) || 0;
+  };
+
   const handleMudancaMeta = (categoria: 'volume' | 'salario', periodoSelecionado: Periodo, valorDigitado: string) => {
     const apenasNumeros = valorDigitado.replace(/\D/g, '');
     const valorConvertido = Number(apenasNumeros) / 100;
@@ -86,7 +108,41 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const processarDados = async () => {
-      const [vendas, parcelas, clientes] = await Promise.all([buscarVendasDoBanco(), buscarParcelasDoBanco(), buscarClientes()]);
+      const [vendas, parcelas, clientes] = await Promise.all([
+        buscarVendasDoBanco(),
+        buscarParcelasDoBanco(),
+        buscarClientes(),
+      ]);
+
+      // Busca Leads em negociação para calcular o "Dinheiro na Mesa"
+      if (user?.uid) {
+        const qLeads = query(collection(db, 'leads'), where('responsavelId', '==', user.uid));
+        const snapLeads = await getDocs(qLeads);
+
+        let emProposta = 0;
+        let qtdProposta = 0;
+        let emFechamento = 0;
+        let qtdFechamento = 0;
+
+        snapLeads.docs.forEach((docSnap) => {
+          const lead = docSnap.data();
+          if (lead.status === 'proposta') {
+            emProposta += moedaTextoParaNumero(lead.valorNegociado);
+            qtdProposta += 1;
+          } else if (lead.status === 'fechado') {
+            emFechamento += moedaTextoParaNumero(lead.valorFechado || lead.valorNegociado);
+            qtdFechamento += 1;
+          }
+        });
+
+        setDinheiroNaMesa({
+          total: emProposta + emFechamento,
+          emProposta,
+          qtdProposta,
+          emFechamento,
+          qtdFechamento,
+        });
+      }
       
       const hoje = new Date();
       hoje.setHours(0, 0, 0, 0); 
@@ -118,7 +174,7 @@ export default function DashboardPage() {
         const niversCalculados = clientes
           .filter(cli => cli.dataNascimento)
           .map(cli => {
-            const [ano, mes, dia] = cli.dataNascimento!.split('-');
+            const [, mes, dia] = cli.dataNascimento!.split('-');
             let dataNiverEsteAno = new Date(anoAtual, Number(mes) - 1, Number(dia));
             if (dataNiverEsteAno < hoje) dataNiverEsteAno.setFullYear(anoAtual + 1);
             const diffTime = dataNiverEsteAno.getTime() - hoje.getTime();
@@ -148,7 +204,8 @@ export default function DashboardPage() {
 
         vendas.forEach(v => {
           const dataV = parseDataSegura(v.dataVenda);
-          const salarioVenda = v.valorComissaoTotal / 13;
+          const divisorParcelas = v.qtdParcelasComissao || 13;
+          const salarioVenda = v.valorComissaoTotal / divisorParcelas;
 
           if (dataV.getFullYear() === anoAtual) {
             base.anual.volume += v.valorTotalCarta;
@@ -236,7 +293,7 @@ export default function DashboardPage() {
     };
 
     processarDados();
-  }, []);
+  }, [user?.uid]);
 
   const renderInputMeta = (categoria: 'volume' | 'salario', periodoSelecionado: Periodo) => (
     <input 
@@ -248,13 +305,9 @@ export default function DashboardPage() {
   );
 
   const RenderCardPreditivo = ({ titulo, categoria }: { titulo: string, categoria: 'volume' | 'salario' }) => {
-    // Cálculo do período atual normal
     const dados = calcularPreditivo(acumulado[periodoAtivo][categoria], metas[categoria][periodoAtivo], tempo[periodoAtivo].passados, tempo[periodoAtivo].restantes);
     const atingido = dados.meta > 0 ? (dados.atual / dados.meta) * 100 : 0;
     
-    // NOVO: Lógica Proporcional Exata (Cota Ideal)
-    // Definimos o próximo período e por quanto temos que dividir essa meta maior
-    // Ex: Mensal -> Trimestral (divide por 3 meses)
     const proximoPeriodoMap: Record<Periodo, { id: Periodo, nome: string, divisor: number } | null> = {
       mensal: { id: 'trimestral', nome: 'Trimestral', divisor: 3 },
       trimestral: { id: 'semestral', nome: 'Semestral', divisor: 2 },
@@ -269,17 +322,13 @@ export default function DashboardPage() {
     let metaProporcional = 0;
     
     if (configProx) {
-      const atualNestePeriodo = acumulado[periodoAtivo][categoria]; // Ex: vendi 800k neste mês
-      const metaTotalDoProximoPeriodo = metas[categoria][configProx.id]; // Ex: Meta do trimestre é 3.6M
-      
-      // A meta que EU TENHO QUE FAZER AGORA (Cota Ideal)
-      metaProporcional = metaTotalDoProximoPeriodo / configProx.divisor; // Ex: 3.6M / 3 = 1.2M por mês
-      
+      const atualNestePeriodo = acumulado[periodoAtivo][categoria];
+      const metaTotalDoProximoPeriodo = metas[categoria][configProx.id];
+      metaProporcional = metaTotalDoProximoPeriodo / configProx.divisor;
       atingidoProxProporcional = metaProporcional > 0 ? (atualNestePeriodo / metaProporcional) * 100 : 0;
       faltaParaMetaProxProporcional = Math.max(metaProporcional - atualNestePeriodo, 0);
     }
     
-    // Cálculos de Cenários de Esforço de Clientes
     const ticketMedio = acumulado[periodoAtivo][categoria] / Math.max(acumulado[periodoAtivo].clientes, 1);
     const maiorValor = acumulado[periodoAtivo][categoria === 'volume' ? 'maiorVolume' : 'maiorSalario'];
     const menorValor = acumulado[periodoAtivo][categoria === 'volume' ? 'menorVolume' : 'menorSalario'];
@@ -291,7 +340,6 @@ export default function DashboardPage() {
     return (
       <div className="bg-black/20 p-4 rounded-xl border border-white/5 relative overflow-hidden group hover:border-white/10 transition-all flex flex-col justify-between">
         <div>
-          {/* BARRA PRINCIPAL */}
           <div className="flex justify-between items-center mb-3">
             <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{titulo}</p>
             <span className="text-[10px] font-bold bg-white/5 px-2 py-1 rounded text-red-500">{atingido.toFixed(1)}% Atingido</span>
@@ -301,7 +349,6 @@ export default function DashboardPage() {
             <div className="bg-red-600 h-1.5 rounded-full transition-all duration-1000" style={{ width: `${Math.min(atingido, 100)}%` }}></div>
           </div>
 
-          {/* BARRA SECUNDÁRIA PROPORCIONAL (Ritmo da Meta Maior) */}
           {configProx && (
             <div className="mb-4">
               <div className="flex justify-between items-center mb-1">
@@ -329,7 +376,6 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* CARTÃO UNIFICADO DE ESFORÇO */}
         <div className="bg-white/5 p-3 rounded-xl border border-white/10 mt-2">
           <p className="text-[10px] text-gray-400 font-bold uppercase mb-2 flex items-center gap-1">
             <Users size={12} className="text-red-500"/> Esforço Necessário
@@ -363,11 +409,36 @@ export default function DashboardPage() {
   return (
     <div className="p-4 md:p-8 animate-in fade-in duration-300">
       
-      <div className="mb-8">
-        <h1 className="text-3xl font-black text-white">
-          Olá, <span className="text-red-600">{firstName}</span>!
-        </h1>
-        <p className="text-gray-400 mt-2">Sua central de inteligência preditiva.</p>
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-8">
+        <div>
+          <h1 className="text-3xl font-black text-white">
+            Olá, <span className="text-red-600">{firstName}</span>!
+          </h1>
+          <p className="text-gray-400 mt-2">Sua central de inteligência preditiva.</p>
+        </div>
+
+        {/* DESTAQUE: DINHEIRO NA MESA (EM NEGOCIAÇÃO NO FUNIL) */}
+        <div
+          onClick={() => navigate('/leads')}
+          className="cursor-pointer bg-linear-to-r from-amber-500/15 via-purple-500/10 to-dark-card border border-amber-500/30 hover:border-amber-400/60 p-4 rounded-2xl flex items-center justify-between gap-6 transition-all shadow-lg"
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-amber-500/20 text-amber-400 rounded-xl">
+              <Coins size={24} />
+            </div>
+            <div>
+              <p className="text-xs font-black uppercase tracking-wider text-amber-400 flex items-center gap-1">
+                Dinheiro na Mesa <ArrowUpRight size={14} />
+              </p>
+              <p className="text-2xl font-black text-white">
+                {carregando ? '-' : formatarValor(dinheiroNaMesa.total)}
+              </p>
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                {dinheiroNaMesa.qtdProposta} em proposta ({formatarValor(dinheiroNaMesa.emProposta)}) • {dinheiroNaMesa.qtdFechamento} aguardando venda ({formatarValor(dinheiroNaMesa.emFechamento)})
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="flex gap-2 mb-6 border-b border-white/5 pb-4 overflow-x-auto">

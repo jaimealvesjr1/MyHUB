@@ -1,6 +1,6 @@
 import React from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, DollarSign, User, Shield, LogOut, Users, Briefcase } from 'lucide-react';
+import { LayoutDashboard, DollarSign, Shield, LogOut, Users, Briefcase, Settings } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 
 export default function MainLayout() {
@@ -69,6 +69,17 @@ export default function MainLayout() {
               <span className="hidden md:inline">Clientes</span>
             </Link>
 
+            {/* NOVO BOTÃO: Configurações de Comissionamento */}
+            <Link 
+              to="/configuracoes" 
+              className={`p-2 md:px-4 md:py-1.5 rounded-full text-sm font-medium flex items-center gap-2 transition-all ${
+                isActive('/configuracoes') ? 'bg-amber-900 text-amber-100 shadow-md border border-amber-500/30' : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Settings size={18} /> 
+              <span className="hidden md:inline">Configurações</span>
+            </Link>
+
             {user?.role === 'admin' && (
               <Link 
                 to="/admin" 
@@ -93,7 +104,7 @@ export default function MainLayout() {
                     className="w-10 h-10 rounded-full object-cover border border-white/10"
                     onError={(e) => {
                       const target = e.currentTarget;
-                      target.onerror = null; // Evita loop infinito se a 2ª imagem também falhar
+                      target.onerror = null;
                       const initial = user?.name ? user.name.charAt(0).toUpperCase() : 'U';
                       target.src = `https://ui-avatars.com/api/?name=${initial}&background=ef4444&color=fff&bold=true`;
                     }}

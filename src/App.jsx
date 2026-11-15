@@ -6,11 +6,14 @@ import { useAuthStore } from './store/useAuthStore';
 import MainLayout from './layouts/MainLayout';
 import AuthScreen from './modules/auth/AuthScreen';
 
+// Carregamento otimizado (Lazy Loading) dos módulos do sistema
 const DashboardModule = lazy(() => import('./modules/dashboard/DashboardPage'));
 const VendasModule = lazy(() => import('./modules/finance/FinancePage')); 
 const ClientesModule = lazy(() => import('./modules/clientes/ClientesPage'));
 const AdminModule = lazy(() => import('./modules/admin/AdminPage'));
 const LeadsModule = lazy(() => import('./modules/leads/LeadsPage'));
+// NOVO MÓDULO: Tela de Configurações de Comissionamento
+const ConfiguracoesModule = lazy(() => import('./modules/configuracoes/ConfiguracoesPage'));
 
 const APP_VERSION = '1.0';
 
@@ -21,6 +24,7 @@ export default function App() {
     initializeAuth();
   }, [initializeAuth]);
 
+  // Tela de carregamento enquanto verifica a sessão no Firebase
   if (isLoading) {
     return (
       <div className="min-h-screen bg-dark-bg flex flex-col items-center justify-center text-red-500">
@@ -30,17 +34,26 @@ export default function App() {
     );
   }
 
+  // Se não houver usuário logado, exibe a tela de login
   if (!user) {
     return <AuthScreen />;
   }
 
   return (
     <BrowserRouter>
+      {/* Notificações flutuantes (Toasts) */}
       <Toaster 
         position="bottom-right"
-        toastOptions={{ style: { background: 'rgba(11, 15, 25, 0.95)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff' } }} 
+        toastOptions={{ 
+          style: { 
+            background: 'rgba(11, 15, 25, 0.95)', 
+            border: '1px solid rgba(255,255,255,0.1)', 
+            color: '#fff' 
+          } 
+        }} 
       />
 
+      {/* Suspense exibe o loading enquanto um módulo lazy está sendo carregado */}
       <Suspense fallback={
         <div className="min-h-screen bg-dark-bg flex flex-col items-center justify-center text-red-500">
           <div className="w-12 h-12 border-4 border-red-600 border-t-transparent rounded-full animate-spin mb-4"></div>
@@ -54,10 +67,18 @@ export default function App() {
             <Route path="/financeiro" element={<VendasModule />} />
             <Route path="/clientes" element={<ClientesModule />} />
             <Route path="/leads" element={<LeadsModule />} />
-            <Route path="/admin" element={user?.role === 'admin' ? <AdminModule /> : <Navigate to="/dashboard" replace />} />
+            
+            {/* NOVA ROTA: Configurações de Comissionamento */}
+            <Route path="/configuracoes" element={<ConfiguracoesModule />} />
+            
+            <Route 
+              path="/admin" 
+              element={user?.role === 'admin' ? <AdminModule /> : <Navigate to="/dashboard" replace />} 
+            />
           </Route>
         </Routes>
         
+        {/* Rodapé Global */}
         <footer className="w-full border-t border-white/5 bg-black/40 py-6 mt-auto shrink-0 z-20 relative">
           <div className="w-full max-w-640 mx-auto px-4 md:px-8 2xl:px-12 min-[2000px]:px-16 flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="flex items-center hover:cursor-pointer group">
