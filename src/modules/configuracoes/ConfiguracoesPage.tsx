@@ -21,6 +21,7 @@ export default function ConfiguracoesPage() {
   const [percentualBonus, setPercentualBonus] = useState('');
   const [parcelaBonus, setParcelaBonus] = useState('15');
 
+  // Carrega os planos cadastrados pelo usuário
   const carregarPlanos = async () => {
     if (!user?.uid) return;
     setCarregando(true);
@@ -33,6 +34,7 @@ export default function ConfiguracoesPage() {
     carregarPlanos();
   }, [user?.uid]);
 
+  // Cria um novo modelo de comissão no Firestore
   const handleCriarPlano = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user?.uid) return;
@@ -62,6 +64,7 @@ export default function ConfiguracoesPage() {
         parcelaBonus: parcelaBonusNum,
       });
 
+      // Limpa os campos após salvar
       setNome('');
       setPercentualBase('');
       setParcelasBase('13');
@@ -72,12 +75,14 @@ export default function ConfiguracoesPage() {
       toast.success('Plano de comissionamento salvo!');
       await carregarPlanos();
     } catch (error) {
+      console.error('Erro ao salvar plano de comissão:', error);
       toast.error('Erro ao salvar configuração.');
     } finally {
       setSalvando(false);
     }
   };
 
+  // Exclui um modelo de comissão (mantendo sempre pelo menos 1 ativo)
   const handleExcluirPlano = async (id?: string) => {
     if (!id) return;
     if (planos.length <= 1) {
@@ -91,7 +96,7 @@ export default function ConfiguracoesPage() {
   };
 
   const formatarMoeda = (val: number) =>
-    val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    (Number.isFinite(val) ? val : 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
   return (
     <div className="p-4 md:p-8 animate-in fade-in duration-300">
@@ -211,11 +216,13 @@ export default function ConfiguracoesPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {planos.map((plano) => {
                 const exemploCarta = 100000;
-                const baseTotal = exemploCarta * (plano.percentualBase / 100);
-                const parcelaMensal = baseTotal / plano.parcelasBase;
+                const percBase = Number(plano.percentualBase || 0);
+                const qtdParcelas = Math.max(1, Number(plano.parcelasBase || 1));
+                const baseTotal = exemploCarta * (percBase / 100);
+                const parcelaMensal = baseTotal / qtdParcelas;
                 const bonusTotal =
                   plano.temBonus && plano.percentualBonus
-                    ? exemploCarta * (plano.percentualBonus / 100)
+                    ? exemploCarta * (Number(plano.percentualBonus) / 100)
                     : 0;
 
                 return (
@@ -235,10 +242,10 @@ export default function ConfiguracoesPage() {
                       <h3 className="text-base font-bold text-white pr-8">{plano.nome}</h3>
                       <div className="flex flex-wrap gap-2 mt-3">
                         <span className="inline-flex items-center gap-1 text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1 rounded-lg font-bold">
-                          <Percent size={12} /> Base: {plano.percentualBase}%
+                          <Percent size={12} /> Base: {percBase}%
                         </span>
                         <span className="inline-flex items-center gap-1 text-xs bg-white/5 text-gray-300 border border-white/10 px-2.5 py-1 rounded-lg font-bold">
-                          <Calendar size={12} /> {plano.parcelasBase}x
+                          <Calendar size={12} /> {qtdParcelas}x
                         </span>
                         {plano.temBonus && (
                           <span className="inline-flex items-center gap-1 text-xs bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2.5 py-1 rounded-lg font-bold">
@@ -250,7 +257,7 @@ export default function ConfiguracoesPage() {
 
                     <div className="pt-3 border-t border-white/5 text-xs text-gray-400 flex flex-col gap-1">
                       <div className="flex justify-between">
-                        <span>Parcela mensal (1ª à {plano.parcelasBase}ª):</span>
+                        <span>Parcela mensal (1ª à {qtdParcelas}ª):</span>
                         <strong className="text-white">{formatarMoeda(parcelaMensal)}</strong>
                       </div>
                       {plano.temBonus && (

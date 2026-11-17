@@ -1,129 +1,130 @@
-import { collection, addDoc, getDocs, QueryDocumentSnapshot, DocumentData, doc, updateDoc, query, where } from 'firebase/firestore';
-import { db, auth } from '../config/firebase'; // Importamos o auth para saber quem está logado
+import {
+  collection,
+  query,
+  where,
+  getDocs,
+  doc,
+  updateDoc,
+  deleteDoc,
+} from 'firebase/firestore';
+import { db, auth } from '../config/firebase';
 import { VendaConsorcio, ParcelaComissao } from '../types/models';
 
-/**
- * Função responsável por salvar a venda e suas parcelas no banco de dados em nuvem.
- * O comando "async" indica que esta função vai demorar um tempo (tempo da internet).
- */
-export async function salvarVendaNoBanco(venda: VendaConsorcio, parcelas: ParcelaComissao[]) {
-  // 1. Verificamos quem é o usuário logado no momento
-  const user = auth.currentUser;
-  
-  // Se não houver sessão, bloqueamos a ação imediatamente
-  if (!user) {
-    throw new Error("Operação negada: Usuário não autenticado.");
-  }
-
-  try {
-    // 2. Carimbamos a venda com o ID do corretor antes de enviar para o banco
-    const vendaComDono = {
-      ...venda,
-      userId: user.uid
-    };
-
-    // 3. Aponta para a coleção 'vendas' no Firebase e adiciona o documento
-    const vendaRef = await addDoc(collection(db, 'vendas'), vendaComDono);
-
-    // 4. Salvar as parcelas garantindo que elas também pertençam ao corretor
-    for (const parcela of parcelas) {
-      const parcelaComDono = {
-        ...parcela,
-        vendaId: vendaRef.id, // Amarra a parcela à venda gerada
-        userId: user.uid      // Amarra a parcela ao usuário logado
-      };
-      
-      // Salva a parcela na coleção 'parcelas'
-      await addDoc(collection(db, 'parcelas'), parcelaComDono);
-    }
-
-    return true;
-    
-  } catch (erro) {
-    console.error("Erro ao salvar no banco de dados:", erro);
-    throw new Error("Não foi possível salvar a venda. Tente novamente.");
-  }
+function extrairTimestamp(data: any): number {
+  if (!data) return 0;
+  if (data instanceof Date) return data.getTime();
+  if (data.seconds) return data.seconds * 1000;
+  const parsed = new Date(data).getTime();
+  return isNaN(parsed) ? 0 : parsed;
 }
 
 /**
- * Busca todas as parcelas de comissão salvas na coleção 'parcelas' que pertencem ao usuário logado.
+ * Regra única de negócio:
+ * - Parcela 1: sempre confirmada (contrato fecha com o pagamento da 1ª parcela).
+ * - Parcela >= 2: confirmada apenas quando o consultor clica em "Pago".
  */
-export async function buscarParcelasDoBanco(): Promise<ParcelaComissao[]> {
-  const user = auth.currentUser;
-  if (!user) return []; // Retorna lista vazia se não estiver logado
-
-  try {
-    // Criamos uma consulta (query) filtrando apenas as parcelas do usuário ativo
-    const q = query(
-      collection(db, 'parcelas'),
-      where('userId', '==', user.uid)
-    );
-
-    const querySnapshot = await getDocs(q);
-    const listaParcelas: ParcelaComissao[] = [];
-
-    querySnapshot.forEach((doc: QueryDocumentSnapshot<DocumentData>) => {
-      listaParcelas.push({
-        id: doc.id,
-        ...doc.data()
-      } as ParcelaComissao);
-    });
-
-    return listaParcelas;
-  } catch (erro) {
-    console.error("Erro ao buscar as parcelas:", erro);
-    return [];
-  }
+export function isParcelaConfirmada(parcela: {
+  numeroParcela: number;
+  status?: string;
+  clientePagou?: boolean;
+}): boolean {
+  if (parcela.numeroParcela === 1) return true;
+  return (
+    parcela.clientePagou === true ||
+    parcela.status === 'CONFIRMADA' ||
+    parcela.status === 'PAGO'
+  );
 }
 
 /**
- * Busca o histórico completo de vendas do usuário logado para gerar as métricas do Dashboard.
+ * Confirma ou desfaz o pagamento da parcela pelo cliente (a partir da 2ª parcela),
+ * liberando a comissão referente ao fechamento daquele mês.
+ */
+export async function alternarConfirmacaoParcela(
+  parcelaId: string,
+  confirmar: boolean
+): Promise<void> {
+  if (!parcelaId) throw new Error('Parcela inválida.');
+
+  const parcelaRef = doc(db, 'parcelas', parcelaId);
+  await updateDoc(parcelaRef, {
+    clientePagou: confirmar,
+    status: confirmar ? 'CONFIRMADA' : 'AGUARDANDO_CLIENTE',
+    dataConfirmacaoPagamento: confirmar ? new Date().toISOString().split('T')[0] : '',
+  });
+}
+
+/**
+ * Busca todas as vendas do usuário logado em ordem cronológica (mais recentes primeiro).
  */
 export async function buscarVendasDoBanco(): Promise<VendaConsorcio[]> {
   const user = auth.currentUser;
-  if (!user) return []; // Retorna lista vazia por segurança
+  if (!user) return [];
 
-  try {
-    // Consulta restrita: traz apenas as vendas onde o campo userId corresponde ao usuário atual
-    const q = query(
-      collection(db, 'vendas'),
-      where('userId', '==', user.uid)
-    );
+  const q = query(collection(db, 'vendas'), where('userId', '==', user.uid));
+  const snapshot = await getDocs(q);
 
-    const querySnapshot = await getDocs(q);
-    const listaVendas: VendaConsorcio[] = [];
+  const lista = snapshot.docs.map((d) => ({
+    id: d.id,
+    ...(d.data() as Omit<VendaConsorcio, 'id'>),
+  }));
 
-    querySnapshot.forEach((doc: QueryDocumentSnapshot<DocumentData>) => {
-      listaVendas.push({
-        id: doc.id,
-        ...doc.data()
-      } as VendaConsorcio);
-    });
-
-    return listaVendas;
-  } catch (erro) {
-    console.error("Erro ao buscar as vendas:", erro);
-    return [];
-  }
+  return lista.sort((a, b) => extrairTimestamp(b.dataVenda) - extrairTimestamp(a.dataVenda));
 }
 
 /**
- * Atualiza os dados de uma venda existente no Firebase.
- * Restrição Educativa: Neste momento, estamos atualizando apenas os dados cadastrais da venda (Cota, Grupo, etc).
+ * Busca todas as parcelas de comissão do usuário logado em ordem cronológica.
  */
-export async function atualizarVendaNoBanco(idVenda: string, dadosAtualizados: Partial<VendaConsorcio>): Promise<void> {
+export async function buscarParcelasDoBanco(): Promise<ParcelaComissao[]> {
   const user = auth.currentUser;
-  if (!user) throw new Error("Usuário não autenticado.");
+  if (!user) return [];
 
-  try {
-    // Aponta especificamente para o documento que tem este ID dentro da coleção 'vendas'
-    const vendaRef = doc(db, 'vendas', idVenda);
-    
-    // Envia apenas os dados que foram modificados.
-    // As regras de segurança do Firebase (backend) irão bloquear a ação se este documento não pertencer ao usuário.
-    await updateDoc(vendaRef, dadosAtualizados);
-  } catch (erro) {
-    console.error("Erro ao atualizar a venda:", erro);
-    throw new Error("Não foi possível atualizar os dados da venda.");
-  }
+  const q = query(collection(db, 'parcelas'), where('userId', '==', user.uid));
+  const snapshot = await getDocs(q);
+
+  const lista = snapshot.docs.map((d) => ({
+    id: d.id,
+    ...(d.data() as Omit<ParcelaComissao, 'id'>),
+  }));
+
+  return lista.sort((a, b) => {
+    const [mesA, anoA] = a.mesAnoReferencia.split('/').map(Number);
+    const [mesB, anoB] = b.mesAnoReferencia.split('/').map(Number);
+    if (anoA !== anoB) return anoA - anoB;
+    if (mesA !== mesB) return mesA - mesB;
+    return a.numeroParcela - b.numeroParcela;
+  });
+}
+
+/**
+ * Atualiza dados cadastrais básicos de uma venda existente.
+ */
+export async function atualizarVendaNoBanco(
+  vendaId: string,
+  dadosAtualizados: Partial<VendaConsorcio>
+): Promise<void> {
+  const vendaRef = doc(db, 'vendas', vendaId);
+  await updateDoc(vendaRef, dadosAtualizados);
+}
+
+/**
+ * Exclui uma venda cadastrada e remove todas as suas parcelas vinculadas.
+ */
+export async function excluirVendaDoBanco(vendaId: string): Promise<void> {
+  const user = auth.currentUser;
+  if (!user || !vendaId) throw new Error('Usuário ou venda inválida.');
+
+  const qParcelas = query(
+    collection(db, 'parcelas'),
+    where('userId', '==', user.uid),
+    where('vendaId', '==', vendaId)
+  );
+  const parcelasSnap = await getDocs(qParcelas);
+
+  const exclusoesParcelas = parcelasSnap.docs.map((pDoc) =>
+    deleteDoc(doc(db, 'parcelas', pDoc.id))
+  );
+  await Promise.all(exclusoesParcelas);
+
+  await deleteDoc(doc(db, 'vendas', vendaId));
 }

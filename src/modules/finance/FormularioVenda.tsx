@@ -37,7 +37,10 @@ export default function FormularioVenda({
   useEffect(() => {
     const carregarIniciais = async () => {
       const clientesDoBanco = await buscarClientes();
-      setListaClientes(clientesDoBanco);
+      const clientesOrdenados = [...clientesDoBanco].sort((a, b) =>
+        a.nomeCompleto.localeCompare(b.nomeCompleto, 'pt-BR')
+      );
+      setListaClientes(clientesOrdenados);
 
       if (user?.uid) {
         const planos = await buscarOuInicializarPlanos(user.uid);

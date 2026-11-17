@@ -1,48 +1,75 @@
+/**
+ * Segmentos de carta de consórcio disponíveis no sistema.
+ * O "| string" garante compatibilidade com registros antigos do banco de dados.
+ */
+export type TipoCartaConsorcio = 'Imobiliária' | 'Automotiva' | 'Serviços' | string;
+
+/**
+ * Estrutura de um plano/regra de comissionamento do consultor.
+ */
+export interface PlanoComissao {
+  id?: string;
+  userId: string;
+  nome: string;
+
+  // Campos principais utilizados na tela de Configurações e no motor de cálculo
+  percentualBase: number;
+  parcelasBase: number;
+  temBonus?: boolean;
+  percentualBonus?: number;
+  parcelaBonus?: number;
+
+  // Campos legados opcionais (mantidos para compatibilidade com planos antigos do banco)
+  percentualTotal?: number;
+  parcelasRegulares?: number;
+  parcelaBonusNumero?: number;
+}
+
+/**
+ * Dados cadastrais de um cliente da carteira.
+ */
 export interface Cliente {
   id?: string;
   nomeCompleto: string;
   cpf: string;
-  dataNascimento: string;
   telefone: string;
-  dataCadastro: Date;
+  dataNascimento?: string;
+  dataCadastro?: any;
+  userId?: string;
 }
 
-export type TipoCartaConsorcio = 'Imobiliária' | 'Automotiva' | 'Serviços' | '';
-
-export interface PlanoComissao {
-  id?: string;
-  userId: string;
-  nome: string;               // Ex: "2% em 13 vezes + 0,3% na 15ª parcela"
-  percentualBase: number;     // Ex: 2
-  parcelasBase: number;       // Ex: 13
-  temBonus?: boolean;         // Ex: true
-  percentualBonus?: number;   // Ex: 0.3
-  parcelaBonus?: number;      // Ex: 15
-}
-
+/**
+ * Dados de uma venda/cota de consórcio vinculada a um cliente.
+ */
 export interface VendaConsorcio {
   id?: string;
   userId: string;
   clienteId: string;
   valorTotalCarta: number;
-  cota: string;
-  grupo: string;
   tipoCarta: TipoCartaConsorcio;
-  dataVenda: Date;
+  grupo: string;
+  cota: string;
+  dataVenda: any;
+  valorComissaoTotal: number;
   planoComissaoId?: string;
   planoComissaoNome?: string;
-  taxaAplicadaNaVenda?: number;
-  valorComissaoTotal: number;
   qtdParcelasComissao?: number;
-  dataPrimeiroRecebimento?: Date;
 }
 
+/**
+ * Parcela mensal de comissão gerada a partir de uma venda:
+ * - 1ª parcela: nasce como 'CONFIRMADA' (contrato fechado).
+ * - 2ª parcela em diante: nasce como 'AGUARDANDO_CLIENTE' até clicar no botão "Pago".
+ */
 export interface ParcelaComissao {
   id?: string;
-  userId?: string;
+  userId: string;
   vendaId: string;
+  clienteId?: string;
   numeroParcela: number;
+  mesAnoReferencia: string; // Formato "MM/AAAA"
   valorReceber: number;
-  mesAnoReferencia: string;
-  status: 'PENDENTE' | 'PAGO';
+  status: 'CONFIRMADA' | 'AGUARDANDO_CLIENTE' | 'PENDENTE' | 'PAGO' | string;
+  clientePagou?: boolean;
+  dataConfirmacaoPagamento?: string;
 }

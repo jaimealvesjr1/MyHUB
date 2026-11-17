@@ -2,29 +2,53 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
 import {
-  TrendingUp, Target, Award, Calendar, BarChart3, Users,
-  Crown, Zap, Clock, Edit2, Check, Gift, Briefcase,
-  Coins, ArrowUpRight
+  Target, Calendar, BarChart3, Clock, Edit2, Check,
+  Gift, Briefcase, Coins, ArrowUpRight, Wallet,
+  BellRing, CheckCircle2, X
 } from 'lucide-react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
+import { toast } from 'react-hot-toast';
 import { db } from '../../config/firebase';
-import { buscarVendasDoBanco, buscarParcelasDoBanco } from '../../services/vendasService';
+import {
+  buscarVendasDoBanco,
+  buscarParcelasDoBanco,
+  alternarConfirmacaoParcela,
+  isParcelaConfirmada
+} from '../../services/vendasService';
 import { buscarClientes } from '../../services/clienteService';
-import { Cliente } from '../../types/models';
-
-interface DadosPreditivos {
-  atual: number;
-  meta: number;
-  mediaDiariaAtual: number;
-  previsaoFechamento: number;
-  faltaParaMeta: number;
-}
+import { Cliente, ParcelaComissao, VendaConsorcio } from '../../types/models';
 
 interface ClienteComNiver extends Cliente {
   diasFaltando: number;
 }
 
+interface ProjecaoMesItem {
+  mes: string;
+  confirmado: number;
+  aguardandoCliente: number;
+}
+
+interface MetricasPeriodo {
+  volume: number;
+  salario: number;
+  comissaoGeral: number;
+  vendas: number;
+  clientes: number;
+  maiorVolume: number;
+  maiorSalario: number;
+}
+
 type Periodo = 'mensal' | 'trimestral' | 'semestral' | 'anual';
+
+const METRICA_INICIAL: MetricasPeriodo = {
+  volume: 0,
+  salario: 0,
+  comissaoGeral: 0,
+  vendas: 0,
+  clientes: 0,
+  maiorVolume: 0,
+  maiorSalario: 0,
+};
 
 export default function DashboardPage() {
   const { user } = useAuthStore();
@@ -33,13 +57,21 @@ export default function DashboardPage() {
 
   const [carregando, setCarregando] = useState(true);
   const [periodoAtivo, setPeriodoAtivo] = useState<Periodo>('mensal');
-  
-  const [maiorVenda, setMaiorVenda] = useState(0);
-  const [recebimentoProximoMes, setRecebimentoProximoMes] = useState(0);
-  const [projecaoMensal, setProjecaoMensal] = useState<{mes: string, valor: number}[]>([]);
-  const [proximosAniversariantes, setProximosAniversariantes] = useState<ClienteComNiver[]>([]);
 
-  // Novo Estado: Dinheiro na Mesa (Negociações ativas no funil)
+  // Fluxo de caixa e confirmações
+  const [recebimentoProxConfirmado, setRecebimentoProxConfirmado] = useState(0);
+  const [recebimentoProxAguardando, setRecebimentoProxAguardando] = useState(0);
+  const [projecaoMensal, setProjecaoMensal] = useState<ProjecaoMesItem[]>([]);
+  const [parcelasPendentes, setParcelasPendentes] = useState<ParcelaComissao[]>([]);
+  const [totalParcelasPendentes, setTotalParcelasPendentes] = useState(0);
+  const [confirmandoParcelaId, setConfirmandoParcelaId] = useState<string | null>(null);
+
+  // Mapas auxiliares para exibição rápida
+  const [vendasMap, setVendasMap] = useState<Record<string, VendaConsorcio>>({});
+  const [clientesMap, setClientesMap] = useState<Record<string, Cliente>>({});
+  const [proximosAniversariantes, setProximosAniversariantes] = useState<ClienteComNiver[]>([]);
+  const [followUpsPendentes, setFollowUpsPendentes] = useState(0);
+
   const [dinheiroNaMesa, setDinheiroNaMesa] = useState({
     total: 0,
     emProposta: 0,
@@ -48,11 +80,11 @@ export default function DashboardPage() {
     qtdFechamento: 0,
   });
 
-  const [acumulado, setAcumulado] = useState({
-    mensal: { volume: 0, salario: 0, comissaoGeral: 0, vendas: 0, clientes: 0, maiorVolume: 0, menorVolume: 0, maiorSalario: 0, menorSalario: 0 },
-    trimestral: { volume: 0, salario: 0, comissaoGeral: 0, vendas: 0, clientes: 0, maiorVolume: 0, menorVolume: 0, maiorSalario: 0, menorSalario: 0 },
-    semestral: { volume: 0, salario: 0, comissaoGeral: 0, vendas: 0, clientes: 0, maiorVolume: 0, menorVolume: 0, maiorSalario: 0, menorSalario: 0 },
-    anual: { volume: 0, salario: 0, comissaoGeral: 0, vendas: 0, clientes: 0, maiorVolume: 0, menorVolume: 0, maiorSalario: 0, menorSalario: 0 },
+  const [acumulado, setAcumulado] = useState<Record<Periodo, MetricasPeriodo>>({
+    mensal: { ...METRICA_INICIAL },
+    trimestral: { ...METRICA_INICIAL },
+    semestral: { ...METRICA_INICIAL },
+    anual: { ...METRICA_INICIAL },
   });
 
   const [tempo, setTempo] = useState({
@@ -62,11 +94,12 @@ export default function DashboardPage() {
     anual: { passados: 1, restantes: 1 },
   });
 
+  // Edição inline de metas
   const [isEditingMetas, setIsEditingMetas] = useState(false);
   const [metas, setMetas] = useState(() => {
-    const saved = localStorage.getItem('metas_crm_ademicon'); 
+    const saved = localStorage.getItem('metas_crm_ademicon');
     if (saved) return JSON.parse(saved);
-    return { 
+    return {
       volume: { mensal: 1000000, trimestral: 3000000, semestral: 6000000, anual: 12000000 },
       salario: { mensal: 1153, trimestral: 3459, semestral: 6918, anual: 13836 }
     };
@@ -75,9 +108,11 @@ export default function DashboardPage() {
   const salvarMetas = () => {
     localStorage.setItem('metas_crm_ademicon', JSON.stringify(metas));
     setIsEditingMetas(false);
+    toast.success('Metas atualizadas!');
   };
 
-  const formatarValor = (valor: number) => valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const formatarValor = (valor: number) =>
+    valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
   const moedaTextoParaNumero = (valorFormatado?: string) => {
     if (!valorFormatado) return 0;
@@ -85,10 +120,17 @@ export default function DashboardPage() {
     return parseFloat(limpo) || 0;
   };
 
-  const handleMudancaMeta = (categoria: 'volume' | 'salario', periodoSelecionado: Periodo, valorDigitado: string) => {
+  const handleMudancaMeta = (
+    categoria: 'volume' | 'salario',
+    periodoSelecionado: Periodo,
+    valorDigitado: string
+  ) => {
     const apenasNumeros = valorDigitado.replace(/\D/g, '');
     const valorConvertido = Number(apenasNumeros) / 100;
-    setMetas({...metas, [categoria]: { ...metas[categoria], [periodoSelecionado]: valorConvertido }});
+    setMetas({
+      ...metas,
+      [categoria]: { ...metas[categoria], [periodoSelecionado]: valorConvertido }
+    });
   };
 
   const parseDataSegura = (dataVenda: any) => {
@@ -98,482 +140,657 @@ export default function DashboardPage() {
     return new Date(dataVenda);
   };
 
-  const calcularPreditivo = (atual: number, meta: number, diasPassados: number, diasRestantes: number): DadosPreditivos => {
-    const passados = Math.max(diasPassados, 1); 
-    const mediaDiariaAtual = atual / passados;
-    const previsaoFechamento = atual + (mediaDiariaAtual * diasRestantes);
-    const faltaParaMeta = Math.max(meta - atual, 0);
-    return { atual, meta, mediaDiariaAtual, previsaoFechamento, faltaParaMeta };
+  const processarDados = async () => {
+    const [vendas, parcelas, clientes] = await Promise.all([
+      buscarVendasDoBanco(),
+      buscarParcelasDoBanco(),
+      buscarClientes(),
+    ]);
+
+    const mapVendas: Record<string, VendaConsorcio> = {};
+    vendas.forEach((v) => {
+      if (v.id) mapVendas[v.id] = v;
+    });
+    setVendasMap(mapVendas);
+
+    const mapClientes: Record<string, Cliente> = {};
+    clientes.forEach((c) => {
+      if (c.id) mapClientes[c.id] = c;
+    });
+    setClientesMap(mapClientes);
+
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    const hojeISO = new Date().toISOString().split('T')[0];
+
+    // 1. Leads (Follow-ups e Dinheiro na Mesa)
+    if (user?.uid) {
+      const qLeads = query(collection(db, 'leads'), where('responsavelId', '==', user.uid));
+      const snapLeads = await getDocs(qLeads);
+
+      let emProposta = 0;
+      let qtdProposta = 0;
+      let emFechamento = 0;
+      let qtdFechamento = 0;
+      let pendentesFollow = 0;
+
+      snapLeads.docs.forEach((docSnap) => {
+        const lead = docSnap.data();
+        if (lead.status === 'proposta') {
+          emProposta += moedaTextoParaNumero(lead.valorNegociado);
+          qtdProposta += 1;
+        } else if (lead.status === 'fechado') {
+          emFechamento += moedaTextoParaNumero(lead.valorFechado || lead.valorNegociado);
+          qtdFechamento += 1;
+        }
+
+        if (lead.status !== 'fechado') {
+          const dataFollow = lead.proximoFollowUpData;
+          const dataRefParado = lead.ultimoFollowUpData || lead.dataChegada;
+          let paradoDias = 0;
+          if (dataRefParado) {
+            const dRef = new Date(`${dataRefParado}T00:00:00`);
+            paradoDias = Math.floor((hoje.getTime() - dRef.getTime()) / (1000 * 60 * 60 * 24));
+          }
+          if ((dataFollow && dataFollow <= hojeISO) || paradoDias >= 3) {
+            pendentesFollow++;
+          }
+        }
+      });
+
+      setFollowUpsPendentes(pendentesFollow);
+      setDinheiroNaMesa({
+        total: emProposta + emFechamento,
+        emProposta,
+        qtdProposta,
+        emFechamento,
+        qtdFechamento,
+      });
+    }
+
+    // 2. Cálculo de dias decorridos/restantes por período
+    const anoAtual = hoje.getFullYear();
+    const mesAtual = hoje.getMonth();
+    const trimestreAtual = Math.floor(mesAtual / 3);
+    const semestreAtual = Math.floor(mesAtual / 6);
+
+    const getDias = (inicio: Date, fim: Date) => {
+      const passados = Math.floor((hoje.getTime() - inicio.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      const restantes = Math.floor((fim.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24));
+      return { passados: Math.max(passados, 1), restantes: Math.max(restantes, 0) };
+    };
+
+    setTempo({
+      mensal: getDias(new Date(anoAtual, mesAtual, 1), new Date(anoAtual, mesAtual + 1, 0)),
+      trimestral: getDias(
+        new Date(anoAtual, trimestreAtual * 3, 1),
+        new Date(anoAtual, (trimestreAtual + 1) * 3, 0)
+      ),
+      semestral: getDias(
+        new Date(anoAtual, semestreAtual * 6, 1),
+        new Date(anoAtual, (semestreAtual + 1) * 6, 0)
+      ),
+      anual: getDias(new Date(anoAtual, 0, 1), new Date(anoAtual, 11, 31)),
+    });
+
+    // 3. Próximos Aniversariantes
+    if (clientes.length > 0) {
+      const niversCalculados = clientes
+        .filter((cli) => cli.dataNascimento)
+        .map((cli) => {
+          const [, mes, dia] = cli.dataNascimento!.split('-');
+          let dataNiverEsteAno = new Date(anoAtual, Number(mes) - 1, Number(dia));
+          if (dataNiverEsteAno < hoje) dataNiverEsteAno.setFullYear(anoAtual + 1);
+          const diffTime = dataNiverEsteAno.getTime() - hoje.getTime();
+          return { ...cli, diasFaltando: Math.ceil(diffTime / (1000 * 60 * 60 * 24)) };
+        })
+        .sort((a, b) => a.diasFaltando - b.diasFaltando)
+        .slice(0, 5);
+      setProximosAniversariantes(niversCalculados);
+    }
+
+    // 4. Acumulado de Vendas por Período
+    if (vendas.length > 0) {
+      const criarBase = () => ({ ...METRICA_INICIAL, cliSet: new Set<string>() });
+      const base = {
+        mensal: criarBase(),
+        trimestral: criarBase(),
+        semestral: criarBase(),
+        anual: criarBase(),
+      };
+
+      const acumular = (alvo: ReturnType<typeof criarBase>, v: VendaConsorcio, sal: number) => {
+        alvo.volume += v.valorTotalCarta;
+        alvo.salario += sal;
+        alvo.comissaoGeral += v.valorComissaoTotal;
+        alvo.vendas += 1;
+        alvo.cliSet.add(v.clienteId);
+        if (v.valorTotalCarta > alvo.maiorVolume) alvo.maiorVolume = v.valorTotalCarta;
+        if (sal > alvo.maiorSalario) alvo.maiorSalario = sal;
+      };
+
+      vendas.forEach((v) => {
+        const dataV = parseDataSegura(v.dataVenda);
+        const salarioVenda = v.valorComissaoTotal / (v.qtdParcelasComissao || 13);
+
+        if (dataV.getFullYear() === anoAtual) {
+          acumular(base.anual, v, salarioVenda);
+          if (Math.floor(dataV.getMonth() / 6) === semestreAtual) acumular(base.semestral, v, salarioVenda);
+          if (Math.floor(dataV.getMonth() / 3) === trimestreAtual) acumular(base.trimestral, v, salarioVenda);
+          if (dataV.getMonth() === mesAtual) acumular(base.mensal, v, salarioVenda);
+        }
+      });
+
+      const finalizar = (b: ReturnType<typeof criarBase>): MetricasPeriodo => ({
+        volume: b.volume,
+        salario: b.salario,
+        comissaoGeral: b.comissaoGeral,
+        vendas: b.vendas,
+        clientes: b.cliSet.size,
+        maiorVolume: b.maiorVolume,
+        maiorSalario: b.maiorSalario,
+      });
+
+      setAcumulado({
+        mensal: finalizar(base.mensal),
+        trimestral: finalizar(base.trimestral),
+        semestral: finalizar(base.semestral),
+        anual: finalizar(base.anual),
+      });
+    }
+
+    // 5. Parcelas e Projeção de Caixa
+    if (parcelas.length > 0) {
+      const proxMesData = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 1);
+      const proxMesFormatado = `${String(proxMesData.getMonth() + 1).padStart(2, '0')}/${proxMesData.getFullYear()}`;
+
+      let proxConfirmado = 0;
+      let proxAguardando = 0;
+      const fluxoAgrupado: Record<string, { confirmado: number; aguardandoCliente: number }> = {};
+
+      parcelas.forEach((p) => {
+        const confirmada = isParcelaConfirmada(p);
+
+        if (!fluxoAgrupado[p.mesAnoReferencia]) {
+          fluxoAgrupado[p.mesAnoReferencia] = { confirmado: 0, aguardandoCliente: 0 };
+        }
+
+        if (confirmada) {
+          fluxoAgrupado[p.mesAnoReferencia].confirmado += p.valorReceber;
+          if (p.mesAnoReferencia === proxMesFormatado) proxConfirmado += p.valorReceber;
+        } else {
+          fluxoAgrupado[p.mesAnoReferencia].aguardandoCliente += p.valorReceber;
+          if (p.mesAnoReferencia === proxMesFormatado) proxAguardando += p.valorReceber;
+        }
+      });
+
+      setRecebimentoProxConfirmado(proxConfirmado);
+      setRecebimentoProxAguardando(proxAguardando);
+
+      const fluxoArray: ProjecaoMesItem[] = Object.keys(fluxoAgrupado)
+        .map((mes) => ({
+          mes,
+          confirmado: fluxoAgrupado[mes].confirmado,
+          aguardandoCliente: fluxoAgrupado[mes].aguardandoCliente,
+        }))
+        .sort((a, b) => {
+          const [mesA, anoA] = a.mes.split('/');
+          const [mesB, anoB] = b.mes.split('/');
+          return anoA !== anoB ? Number(anoA) - Number(anoB) : Number(mesA) - Number(mesB);
+        })
+        .filter((item) => {
+          const [mesItem, anoItem] = item.mes.split('/');
+          return (
+            new Date(Number(anoItem), Number(mesItem) - 1, 1) >=
+            new Date(hoje.getFullYear(), hoje.getMonth(), 1)
+          );
+        })
+        .slice(0, 6);
+
+      setProjecaoMensal(fluxoArray);
+
+      const todasAguardando = parcelas.filter((p) => p.numeroParcela >= 2 && !isParcelaConfirmada(p));
+      setTotalParcelasPendentes(todasAguardando.length);
+      setParcelasPendentes(todasAguardando.slice(0, 6));
+    } else {
+      setParcelasPendentes([]);
+      setTotalParcelasPendentes(0);
+    }
+
+    setCarregando(false);
   };
 
   useEffect(() => {
-    const processarDados = async () => {
-      const [vendas, parcelas, clientes] = await Promise.all([
-        buscarVendasDoBanco(),
-        buscarParcelasDoBanco(),
-        buscarClientes(),
-      ]);
-
-      // Busca Leads em negociação para calcular o "Dinheiro na Mesa"
-      if (user?.uid) {
-        const qLeads = query(collection(db, 'leads'), where('responsavelId', '==', user.uid));
-        const snapLeads = await getDocs(qLeads);
-
-        let emProposta = 0;
-        let qtdProposta = 0;
-        let emFechamento = 0;
-        let qtdFechamento = 0;
-
-        snapLeads.docs.forEach((docSnap) => {
-          const lead = docSnap.data();
-          if (lead.status === 'proposta') {
-            emProposta += moedaTextoParaNumero(lead.valorNegociado);
-            qtdProposta += 1;
-          } else if (lead.status === 'fechado') {
-            emFechamento += moedaTextoParaNumero(lead.valorFechado || lead.valorNegociado);
-            qtdFechamento += 1;
-          }
-        });
-
-        setDinheiroNaMesa({
-          total: emProposta + emFechamento,
-          emProposta,
-          qtdProposta,
-          emFechamento,
-          qtdFechamento,
-        });
-      }
-      
-      const hoje = new Date();
-      hoje.setHours(0, 0, 0, 0); 
-      
-      const anoAtual = hoje.getFullYear();
-      const mesAtual = hoje.getMonth(); 
-      const trimestreAtual = Math.floor(mesAtual / 3);
-      const semestreAtual = Math.floor(mesAtual / 6);
-      
-      const inicioTrimestre = new Date(anoAtual, trimestreAtual * 3, 1);
-      const fimTrimestre = new Date(anoAtual, (trimestreAtual + 1) * 3, 0);
-      const inicioSemestre = new Date(anoAtual, semestreAtual * 6, 1);
-      const fimSemestre = new Date(anoAtual, (semestreAtual + 1) * 6, 0);
-      
-      const getDias = (inicio: Date, fim: Date) => {
-        const passados = Math.floor((hoje.getTime() - inicio.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-        const restantes = Math.floor((fim.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24));
-        return { passados: Math.max(passados, 1), restantes: Math.max(restantes, 0) };
-      };
-
-      setTempo({
-        mensal: getDias(new Date(anoAtual, mesAtual, 1), new Date(anoAtual, mesAtual + 1, 0)),
-        trimestral: getDias(inicioTrimestre, fimTrimestre),
-        semestral: getDias(inicioSemestre, fimSemestre),
-        anual: getDias(new Date(anoAtual, 0, 1), new Date(anoAtual, 11, 31)),
-      });
-
-      if (clientes.length > 0) {
-        const niversCalculados = clientes
-          .filter(cli => cli.dataNascimento)
-          .map(cli => {
-            const [, mes, dia] = cli.dataNascimento!.split('-');
-            let dataNiverEsteAno = new Date(anoAtual, Number(mes) - 1, Number(dia));
-            if (dataNiverEsteAno < hoje) dataNiverEsteAno.setFullYear(anoAtual + 1);
-            const diffTime = dataNiverEsteAno.getTime() - hoje.getTime();
-            return { ...cli, diasFaltando: Math.ceil(diffTime / (1000 * 60 * 60 * 24)) };
-          })
-          .sort((a, b) => a.diasFaltando - b.diasFaltando)
-          .slice(0, 5); 
-        setProximosAniversariantes(niversCalculados);
-      }
-
-      if (vendas.length > 0) {
-        setMaiorVenda(Math.max(...vendas.map(v => v.valorTotalCarta)));
-
-        const base = {
-          mensal: { volume: 0, salario: 0, comissaoGeral: 0, vendas: 0, cliSet: new Set(), maiorVolume: 0, menorVolume: Infinity, maiorSalario: 0, menorSalario: Infinity },
-          trimestral: { volume: 0, salario: 0, comissaoGeral: 0, vendas: 0, cliSet: new Set(), maiorVolume: 0, menorVolume: Infinity, maiorSalario: 0, menorSalario: Infinity },
-          semestral: { volume: 0, salario: 0, comissaoGeral: 0, vendas: 0, cliSet: new Set(), maiorVolume: 0, menorVolume: Infinity, maiorSalario: 0, menorSalario: Infinity },
-          anual: { volume: 0, salario: 0, comissaoGeral: 0, vendas: 0, cliSet: new Set(), maiorVolume: 0, menorVolume: Infinity, maiorSalario: 0, menorSalario: Infinity },
-        };
-
-        const registrarMaxMin = (periodo: any, vol: number, sal: number) => {
-          if (vol > periodo.maiorVolume) periodo.maiorVolume = vol;
-          if (vol < periodo.menorVolume) periodo.menorVolume = vol;
-          if (sal > periodo.maiorSalario) periodo.maiorSalario = sal;
-          if (sal < periodo.menorSalario) periodo.menorSalario = sal;
-        };
-
-        vendas.forEach(v => {
-          const dataV = parseDataSegura(v.dataVenda);
-          const divisorParcelas = v.qtdParcelasComissao || 13;
-          const salarioVenda = v.valorComissaoTotal / divisorParcelas;
-
-          if (dataV.getFullYear() === anoAtual) {
-            base.anual.volume += v.valorTotalCarta;
-            base.anual.salario += salarioVenda;
-            base.anual.comissaoGeral += v.valorComissaoTotal;
-            base.anual.vendas++;
-            base.anual.cliSet.add(v.clienteId);
-            registrarMaxMin(base.anual, v.valorTotalCarta, salarioVenda);
-
-            if (Math.floor(dataV.getMonth() / 6) === semestreAtual) {
-              base.semestral.volume += v.valorTotalCarta;
-              base.semestral.salario += salarioVenda;
-              base.semestral.comissaoGeral += v.valorComissaoTotal;
-              base.semestral.vendas++;
-              base.semestral.cliSet.add(v.clienteId);
-              registrarMaxMin(base.semestral, v.valorTotalCarta, salarioVenda);
-            }
-
-            if (Math.floor(dataV.getMonth() / 3) === trimestreAtual) {
-              base.trimestral.volume += v.valorTotalCarta;
-              base.trimestral.salario += salarioVenda;
-              base.trimestral.comissaoGeral += v.valorComissaoTotal;
-              base.trimestral.vendas++;
-              base.trimestral.cliSet.add(v.clienteId);
-              registrarMaxMin(base.trimestral, v.valorTotalCarta, salarioVenda);
-            }
-
-            if (dataV.getMonth() === mesAtual) {
-              base.mensal.volume += v.valorTotalCarta;
-              base.mensal.salario += salarioVenda;
-              base.mensal.comissaoGeral += v.valorComissaoTotal;
-              base.mensal.vendas++;
-              base.mensal.cliSet.add(v.clienteId);
-              registrarMaxMin(base.mensal, v.valorTotalCarta, salarioVenda);
-            }
-          }
-        });
-
-        const sanitizar = (p: any) => ({
-          ...p,
-          clientes: p.cliSet.size,
-          menorVolume: p.menorVolume === Infinity ? 0 : p.menorVolume,
-          menorSalario: p.menorSalario === Infinity ? 0 : p.menorSalario
-        });
-
-        setAcumulado({
-          mensal: sanitizar(base.mensal),
-          trimestral: sanitizar(base.trimestral),
-          semestral: sanitizar(base.semestral),
-          anual: sanitizar(base.anual),
-        });
-      }
-
-      if (parcelas.length > 0) {
-        const proxMesData = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 1);
-        const proxMesFormatado = `${String(proxMesData.getMonth() + 1).padStart(2, '0')}/${proxMesData.getFullYear()}`;
-        
-        let recebimentoProx = 0;
-        const fluxoAgrupado: Record<string, number> = {};
-        
-        parcelas.forEach(p => {
-          if (p.status === 'PENDENTE') {
-            fluxoAgrupado[p.mesAnoReferencia] = (fluxoAgrupado[p.mesAnoReferencia] || 0) + p.valorReceber;
-            if (p.mesAnoReferencia === proxMesFormatado) recebimentoProx += p.valorReceber;
-          }
-        });
-
-        setRecebimentoProximoMes(recebimentoProx);
-
-        const fluxoArray = Object.keys(fluxoAgrupado)
-          .map(mes => ({ mes, valor: fluxoAgrupado[mes] }))
-          .sort((a, b) => {
-            const [mesA, anoA] = a.mes.split('/');
-            const [mesB, anoB] = b.mes.split('/');
-            return (anoA !== anoB) ? Number(anoA) - Number(anoB) : Number(mesA) - Number(mesB);
-          })
-          .filter(item => {
-            const [mesItem, anoItem] = item.mes.split('/');
-            return new Date(Number(anoItem), Number(mesItem) - 1, 1) >= new Date(hoje.getFullYear(), hoje.getMonth(), 1);
-          }).slice(0, 6); 
-          
-        setProjecaoMensal(fluxoArray);
-      }
-      setCarregando(false);
-    };
-
     processarDados();
   }, [user?.uid]);
 
-  const renderInputMeta = (categoria: 'volume' | 'salario', periodoSelecionado: Periodo) => (
-    <input 
-      type="text" 
-      value={formatarValor(metas[categoria][periodoSelecionado])}
-      onChange={(e) => handleMudancaMeta(categoria, periodoSelecionado, e.target.value)}
-      className="block w-full bg-black/50 border border-white/10 rounded px-2 py-1 text-sm text-white outline-none focus:border-red-500"
-    />
-  );
-
-  const RenderCardPreditivo = ({ titulo, categoria }: { titulo: string, categoria: 'volume' | 'salario' }) => {
-    const dados = calcularPreditivo(acumulado[periodoAtivo][categoria], metas[categoria][periodoAtivo], tempo[periodoAtivo].passados, tempo[periodoAtivo].restantes);
-    const atingido = dados.meta > 0 ? (dados.atual / dados.meta) * 100 : 0;
-    
-    const proximoPeriodoMap: Record<Periodo, { id: Periodo, nome: string, divisor: number } | null> = {
-      mensal: { id: 'trimestral', nome: 'Trimestral', divisor: 3 },
-      trimestral: { id: 'semestral', nome: 'Semestral', divisor: 2 },
-      semestral: { id: 'anual', nome: 'Anual', divisor: 2 },
-      anual: null
-    };
-    
-    const configProx = proximoPeriodoMap[periodoAtivo];
-    
-    let atingidoProxProporcional = 0;
-    let faltaParaMetaProxProporcional = 0;
-    let metaProporcional = 0;
-    
-    if (configProx) {
-      const atualNestePeriodo = acumulado[periodoAtivo][categoria];
-      const metaTotalDoProximoPeriodo = metas[categoria][configProx.id];
-      metaProporcional = metaTotalDoProximoPeriodo / configProx.divisor;
-      atingidoProxProporcional = metaProporcional > 0 ? (atualNestePeriodo / metaProporcional) * 100 : 0;
-      faltaParaMetaProxProporcional = Math.max(metaProporcional - atualNestePeriodo, 0);
+  const handleConfirmarParcelaRapida = async (parcela: ParcelaComissao) => {
+    if (!parcela.id) return;
+    setConfirmandoParcelaId(parcela.id);
+    try {
+      await alternarConfirmacaoParcela(parcela.id, true);
+      toast.success(`Parcela ${parcela.numeroParcela} confirmada (${parcela.mesAnoReferencia})!`);
+      await processarDados();
+    } catch {
+      toast.error('Erro ao confirmar pagamento da parcela.');
+    } finally {
+      setConfirmandoParcelaId(null);
     }
-    
-    const ticketMedio = acumulado[periodoAtivo][categoria] / Math.max(acumulado[periodoAtivo].clientes, 1);
-    const maiorValor = acumulado[periodoAtivo][categoria === 'volume' ? 'maiorVolume' : 'maiorSalario'];
-    const menorValor = acumulado[periodoAtivo][categoria === 'volume' ? 'menorVolume' : 'menorSalario'];
-    
-    const qtdTicket = (dados.faltaParaMeta > 0 && ticketMedio > 0) ? Math.ceil(dados.faltaParaMeta / ticketMedio) : 0;
-    const qtdMaior = (dados.faltaParaMeta > 0 && maiorValor > 0) ? Math.ceil(dados.faltaParaMeta / maiorValor) : 0;
-    const qtdMenor = (dados.faltaParaMeta > 0 && menorValor > 0) ? Math.ceil(dados.faltaParaMeta / menorValor) : 0;
-    
+  };
+
+  // Componente limpo de Meta + Previsão + Edição Inline
+  const RenderCardMeta = ({ titulo, categoria }: { titulo: string; categoria: 'volume' | 'salario' }) => {
+    const atual = acumulado[periodoAtivo][categoria];
+    const meta = metas[categoria][periodoAtivo];
+    const { passados, restantes } = tempo[periodoAtivo];
+
+    const mediaDiaria = atual / Math.max(passados, 1);
+    const previsaoFechamento = atual + mediaDiaria * restantes;
+    const faltaParaMeta = Math.max(meta - atual, 0);
+    const atingido = meta > 0 ? (atual / meta) * 100 : 0;
+
+    const ticketMedio =
+      acumulado[periodoAtivo].vendas > 0 ? atual / acumulado[periodoAtivo].vendas : 0;
+    const recorde =
+      categoria === 'volume'
+        ? acumulado[periodoAtivo].maiorVolume
+        : acumulado[periodoAtivo].maiorSalario;
+
+    const qtdTicket = faltaParaMeta > 0 && ticketMedio > 0 ? Math.ceil(faltaParaMeta / ticketMedio) : 0;
+    const qtdRecorde = faltaParaMeta > 0 && recorde > 0 ? Math.ceil(faltaParaMeta / recorde) : 0;
+
     return (
-      <div className="bg-black/20 p-4 rounded-xl border border-white/5 relative overflow-hidden group hover:border-white/10 transition-all flex flex-col justify-between">
+      <div className="bg-black/25 p-5 rounded-2xl border border-white/5 flex flex-col justify-between gap-4">
         <div>
-          <div className="flex justify-between items-center mb-3">
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{titulo}</p>
-            <span className="text-[10px] font-bold bg-white/5 px-2 py-1 rounded text-red-500">{atingido.toFixed(1)}% Atingido</span>
-          </div>
-          
-          <div className="w-full bg-gray-800 rounded-full h-1.5 mb-2">
-            <div className="bg-red-600 h-1.5 rounded-full transition-all duration-1000" style={{ width: `${Math.min(atingido, 100)}%` }}></div>
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">{titulo}</span>
+            <span
+              className={`text-xs font-black px-2.5 py-0.5 rounded-full ${
+                atingido >= 100
+                  ? 'bg-emerald-500/20 text-emerald-400'
+                  : 'bg-red-500/15 text-red-400'
+              }`}
+            >
+              {atingido.toFixed(1)}%
+            </span>
           </div>
 
-          {configProx && (
-            <div className="mb-4">
-              <div className="flex justify-between items-center mb-1">
-                <p className="text-[9px] font-bold text-gray-500 uppercase tracking-wide">
-                  Ritmo p/ Meta {configProx.nome} (Cota Ideal: {formatarValor(metaProporcional)})
-                </p>
-                <span className="text-[9px] font-bold text-red-400">{atingidoProxProporcional.toFixed(1)}%</span>
+          {/* Valor Realizado vs Meta (com input inline ao clicar em Editar Metas) */}
+          <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+            <p className="text-xl font-black text-white">{formatarValor(atual)}</p>
+            {isEditingMetas ? (
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-gray-400">Meta:</span>
+                <input
+                  type="text"
+                  value={formatarValor(meta)}
+                  onChange={(e) => handleMudancaMeta(categoria, periodoAtivo, e.target.value)}
+                  className="w-32 bg-black/70 border border-red-500 rounded-lg px-2.5 py-1 text-sm font-bold text-white outline-none"
+                />
               </div>
-              <div className="w-full bg-gray-900 rounded-full h-1 mb-1 border border-white/5">
-                <div className="bg-red-800 h-1 rounded-full transition-all duration-1000" style={{ width: `${Math.min(atingidoProxProporcional, 100)}%` }}></div>
-              </div>
-              <p className="text-[9px] text-gray-400 text-right">Faltam {formatarValor(faltaParaMetaProxProporcional)}</p>
-            </div>
-          )}
+            ) : (
+              <p className="text-xs text-gray-400">
+                Meta: <strong className="text-gray-200">{formatarValor(meta)}</strong>
+              </p>
+            )}
+          </div>
 
-          <div className="grid grid-cols-2 gap-4 mb-4 mt-4">
+          {/* Barra de Progresso */}
+          <div className="w-full bg-gray-800 rounded-full h-2 mb-4 overflow-hidden">
+            <div
+              className={`h-2 rounded-full transition-all duration-700 ${
+                atingido >= 100 ? 'bg-emerald-500' : 'bg-red-600'
+              }`}
+              style={{ width: `${Math.min(atingido, 100)}%` }}
+            />
+          </div>
+
+          {/* Previsão & Falta */}
+          <div className="grid grid-cols-2 gap-3 bg-black/30 p-3 rounded-xl border border-white/5">
             <div>
-              <p className="text-[10px] text-gray-500 uppercase">Previsão Fechamento</p>
-              <p className="text-sm font-bold text-white">{formatarValor(dados.previsaoFechamento)}</p>
+              <p className="text-[10px] text-gray-500 uppercase font-bold">Previsão Fechamento</p>
+              <p className="text-sm font-bold text-white mt-0.5">
+                {formatarValor(previsaoFechamento)}
+              </p>
             </div>
             <div>
-              <p className="text-[10px] text-gray-500 uppercase">Falta p/ Meta Atual</p>
-              <p className="text-sm font-bold text-gray-300">{formatarValor(dados.faltaParaMeta)}</p>
+              <p className="text-[10px] text-gray-500 uppercase font-bold">Falta p/ Meta</p>
+              <p className="text-sm font-bold text-gray-300 mt-0.5">
+                {faltaParaMeta === 0 ? 'Meta batida! 🎉' : formatarValor(faltaParaMeta)}
+              </p>
             </div>
           </div>
         </div>
 
-        <div className="bg-white/5 p-3 rounded-xl border border-white/10 mt-2">
-          <p className="text-[10px] text-gray-400 font-bold uppercase mb-2 flex items-center gap-1">
-            <Users size={12} className="text-red-500"/> Esforço Necessário
-          </p>
-          <div className="flex flex-col gap-2">
-            <div className="flex justify-between items-center bg-black/20 p-2 rounded">
-               <span className="text-xs text-gray-400">Pelo Ticket Médio:</span>
-               <span className="text-sm font-bold text-white">{qtdTicket} <span className="text-[10px] text-gray-500 font-normal">de {formatarValor(ticketMedio)}</span></span>
-            </div>
-            <div className="flex justify-between items-center bg-black/20 p-2 rounded">
-               <span className="text-xs text-gray-400">Pelo Crédito Recorde:</span>
-               <span className="text-sm font-bold text-emerald-400">{qtdMaior} <span className="text-[10px] text-gray-500 font-normal">de {formatarValor(maiorValor)}</span></span>
-            </div>
-            <div className="flex justify-between items-center bg-black/20 p-2 rounded">
-               <span className="text-xs text-gray-400">Pelo Menor Crédito:</span>
-               <span className="text-sm font-bold text-orange-400">{qtdMenor} <span className="text-[10px] text-gray-500 font-normal">de {formatarValor(menorValor)}</span></span>
-            </div>
+        {/* Esforço Prático (apenas se ainda faltar para a meta e já houver vendas) */}
+        {faltaParaMeta > 0 && ticketMedio > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-400 pt-2 border-t border-white/5">
+            <span>
+              No ticket médio: <strong className="text-white">{qtdTicket} vendas</strong>
+            </span>
+            <span>
+              No recorde: <strong className="text-emerald-400">{qtdRecorde} vendas</strong>
+            </span>
           </div>
-        </div>
+        )}
       </div>
     );
   };
 
-  const menuPeriodos: { id: Periodo, label: string }[] = [
+  const menuPeriodos: { id: Periodo; label: string }[] = [
     { id: 'mensal', label: 'Mensal' },
     { id: 'trimestral', label: 'Trimestral' },
     { id: 'semestral', label: 'Semestral' },
-    { id: 'anual', label: 'Anual' }
+    { id: 'anual', label: 'Anual' },
   ];
 
+  const dadosPeriodo = acumulado[periodoAtivo];
+  const ticketMedioPeriodo =
+    dadosPeriodo.vendas > 0 ? dadosPeriodo.volume / dadosPeriodo.vendas : 0;
+
   return (
-    <div className="p-4 md:p-8 animate-in fade-in duration-300">
-      
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-8">
+    <div className="p-4 md:p-8 max-w-7xl mx-auto animate-in fade-in duration-300">
+      {/* 1. CABEÇALHO + ALERTA DE FOLLOW-UP */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-3xl font-black text-white">
+          <h1 className="text-2xl md:text-3xl font-black text-white">
             Olá, <span className="text-red-600">{firstName}</span>!
           </h1>
-          <p className="text-gray-400 mt-2">Sua central de inteligência preditiva.</p>
+          <p className="text-sm text-gray-400 mt-1">
+            Resumo operacional, fechamentos e metas em tempo real.
+          </p>
         </div>
 
-        {/* DESTAQUE: DINHEIRO NA MESA (EM NEGOCIAÇÃO NO FUNIL) */}
-        <div
-          onClick={() => navigate('/leads')}
-          className="cursor-pointer bg-linear-to-r from-amber-500/15 via-purple-500/10 to-dark-card border border-amber-500/30 hover:border-amber-400/60 p-4 rounded-2xl flex items-center justify-between gap-6 transition-all shadow-lg"
-        >
-          <div className="flex items-center gap-3">
-            <div className="p-3 bg-amber-500/20 text-amber-400 rounded-xl">
-              <Coins size={24} />
-            </div>
-            <div>
-              <p className="text-xs font-black uppercase tracking-wider text-amber-400 flex items-center gap-1">
-                Dinheiro na Mesa <ArrowUpRight size={14} />
-              </p>
-              <p className="text-2xl font-black text-white">
-                {carregando ? '-' : formatarValor(dinheiroNaMesa.total)}
-              </p>
-              <p className="text-[11px] text-gray-400 mt-0.5">
-                {dinheiroNaMesa.qtdProposta} em proposta ({formatarValor(dinheiroNaMesa.emProposta)}) • {dinheiroNaMesa.qtdFechamento} aguardando venda ({formatarValor(dinheiroNaMesa.emFechamento)})
-              </p>
-            </div>
+        <div className="flex flex-wrap items-center gap-3">
+          {followUpsPendentes > 0 && (
+            <button
+              onClick={() => navigate('/leads')}
+              className="bg-red-600/15 border border-red-500/40 hover:border-red-400 px-4 py-2.5 rounded-2xl flex items-center gap-2.5 transition-all text-left"
+            >
+              <BellRing size={18} className="text-red-400 shrink-0" />
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-wider text-red-400 flex items-center gap-1">
+                  Atenção nos Leads <ArrowUpRight size={12} />
+                </p>
+                <p className="text-sm font-black text-white">
+                  {followUpsPendentes}{' '}
+                  {followUpsPendentes === 1 ? 'follow-up pendente' : 'follow-ups pendentes'}
+                </p>
+              </div>
+            </button>
+          )}
+
+          {/* Seletor de Período */}
+          <div className="flex bg-dark-card border border-dark-border p-1 rounded-full">
+            {menuPeriodos.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setPeriodoAtivo(p.id)}
+                className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-colors ${
+                  periodoAtivo === p.id
+                    ? 'bg-red-600 text-white'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
           </div>
         </div>
       </div>
 
-      <div className="flex gap-2 mb-6 border-b border-white/5 pb-4 overflow-x-auto">
-        {menuPeriodos.map(p => (
+      {/* 2. 4 KPIs ESSENCIAIS (SEM REDUNDÂNCIA) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {/* Card 1: Volume + Cotas + Ticket Médio */}
+        <div className="bg-linear-to-br from-blue-600/15 to-dark-card border border-blue-500/30 p-5 rounded-2xl flex flex-col justify-between">
+          <p className="text-xs text-blue-400 font-bold flex items-center gap-1.5">
+            <Wallet size={15} /> Volume Vendido ({periodoAtivo})
+          </p>
+          <p className="text-2xl font-black text-white my-2">
+            {carregando ? '-' : formatarValor(dadosPeriodo.volume)}
+          </p>
+          <p className="text-[11px] text-gray-400">
+            {dadosPeriodo.vendas} {dadosPeriodo.vendas === 1 ? 'cota' : 'cotas'} • Ticket:{' '}
+            <strong className="text-gray-200">{formatarValor(ticketMedioPeriodo)}</strong>
+          </p>
+        </div>
+
+        {/* Card 2: Salário Gerado + Comissão Total */}
+        <div className="bg-dark-card border border-dark-border p-5 rounded-2xl flex flex-col justify-between">
+          <p className="text-xs text-gray-400 font-bold flex items-center gap-1.5">
+            <Briefcase size={15} className="text-emerald-400" /> Salário Gerado ({periodoAtivo})
+          </p>
+          <p className="text-2xl font-black text-emerald-400 my-2">
+            {carregando ? '-' : formatarValor(dadosPeriodo.salario)}
+          </p>
+          <p className="text-[11px] text-gray-400">
+            Comissão total: <strong className="text-gray-200">{formatarValor(dadosPeriodo.comissaoGeral)}</strong>
+          </p>
+        </div>
+
+        {/* Card 3: Próximo Fechamento (Confirmado vs Aguardando Cliente) */}
+        <div className="bg-emerald-600/10 border border-emerald-500/30 p-5 rounded-2xl flex flex-col justify-between">
+          <p className="text-xs text-emerald-400 font-bold flex items-center gap-1.5">
+            <Clock size={15} /> Próximo Fechamento
+          </p>
+          <p className="text-2xl font-black text-emerald-400 my-2">
+            {carregando ? '-' : formatarValor(recebimentoProxConfirmado)}
+          </p>
+          <p className="text-[11px] text-gray-300">
+            Confirmado • <span className="text-amber-400">+{formatarValor(recebimentoProxAguardando)} prev.</span>
+          </p>
+        </div>
+
+        {/* Card 4: Dinheiro na Mesa (Funil de Leads) */}
+        <div
+          onClick={() => navigate('/leads')}
+          className="cursor-pointer bg-linear-to-br from-amber-500/15 to-dark-card border border-amber-500/30 hover:border-amber-400/60 p-5 rounded-2xl flex flex-col justify-between transition-all"
+        >
+          <p className="text-xs text-amber-400 font-bold flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <Coins size={15} /> Dinheiro na Mesa
+            </span>
+            <ArrowUpRight size={14} />
+          </p>
+          <p className="text-2xl font-black text-white my-2">
+            {carregando ? '-' : formatarValor(dinheiroNaMesa.total)}
+          </p>
+          <p className="text-[11px] text-gray-400">
+            {dinheiroNaMesa.qtdProposta} propostas • {dinheiroNaMesa.qtdFechamento} em fechamento
+          </p>
+        </div>
+      </div>
+
+      {/* 3. FLUXO DE RECEBIMENTOS (6 MESES) + CONFIRMAÇÃO RÁPIDA ("PAGO") */}
+      <div className="bg-dark-card border border-dark-border rounded-3xl p-6 shadow-lg mb-8">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-5">
+          <h2 className="text-base font-bold text-white flex items-center gap-2">
+            <Calendar className="text-red-500" size={18} />
+            Fluxo de Comissões (Próximos 6 Meses)
+          </h2>
           <button
-            key={p.id}
-            onClick={() => setPeriodoAtivo(p.id)}
-            className={`px-4 py-2 rounded-full text-sm font-bold transition-colors whitespace-nowrap ${
-              periodoAtivo === p.id 
-                ? 'bg-red-600 text-white' 
-                : 'bg-white/5 text-gray-400 hover:text-white hover:bg-white/10'
-            }`}
+            onClick={() => navigate('/financeiro')}
+            className="text-xs font-bold text-gray-400 hover:text-white transition-colors"
           >
-            {p.label}
+            Gerenciar vendas e parcelas →
           </button>
-        ))}
-      </div>
+        </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-6 gap-4 mb-8">
-        <div className="bg-dark-card border border-dark-border p-4 rounded-2xl flex flex-col justify-between hover:border-gray-500/30 transition-colors">
-          <p className="text-xs text-gray-400 flex items-center gap-1"><Zap size={14}/> Vendas no Período</p>
-          <p className="text-xl font-black text-white mt-2">{carregando ? '-' : acumulado[periodoAtivo].vendas}</p>
-        </div>
-        <div className="bg-dark-card border border-dark-border p-4 rounded-2xl flex flex-col justify-between hover:border-gray-500/30 transition-colors">
-          <p className="text-xs text-gray-400 flex items-center gap-1"><Users size={14}/> Ticket Médio (Cliente)</p>
-          <p className="text-xl font-black text-white mt-2">
-            {carregando ? '-' : formatarValor(acumulado[periodoAtivo].volume / Math.max(acumulado[periodoAtivo].clientes, 1))}
-          </p>
-        </div>
-        <div className="bg-dark-card border border-dark-border p-4 rounded-2xl flex flex-col justify-between hover:border-gray-500/30 transition-colors">
-          <p className="text-xs text-gray-400 flex items-center gap-1"><TrendingUp size={14}/> Média de Volume / Dia</p>
-          <p className="text-xl font-black text-white mt-2">
-            {carregando ? '-' : formatarValor(acumulado[periodoAtivo].volume / tempo[periodoAtivo].passados)}
-          </p>
-        </div>
-        <div className="bg-dark-card border border-dark-border p-4 rounded-2xl flex flex-col justify-between hover:border-gray-500/30 transition-colors">
-          <p className="text-xs text-gray-400 flex items-center gap-1"><Crown size={14}/> Recorde de Carta</p>
-          <p className="text-xl font-black text-gray-300 mt-2">{carregando ? '-' : formatarValor(maiorVenda)}</p>
-        </div>
-        <div className="bg-dark-card border border-dark-border p-4 rounded-2xl flex flex-col justify-between hover:border-red-500/30 transition-colors">
-          <p className="text-xs text-gray-400 flex items-center gap-1"><Award size={14}/> Comissão Acumulada</p>
-          <p className="text-xl font-black text-red-500 mt-2">{carregando ? '-' : formatarValor(acumulado[periodoAtivo].comissaoGeral)}</p>
-        </div>
-        
-        <div className="border border-red-500/30 bg-red-600/10 p-4 rounded-2xl flex flex-col justify-between">
-          <p className="text-xs text-red-500 font-bold flex items-center gap-1"><Clock size={14}/> Receber Próximo Mês</p>
-          <p className="text-xl font-black text-red-500 mt-2">{carregando ? '-' : formatarValor(recebimentoProximoMes)}</p>
-        </div>
-      </div>
-
-      <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-        <Calendar className="text-red-500" size={20}/> Comissões a Receber (Próximos 6 Meses)
-      </h3>
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-10">
-        {carregando ? (
-          <div className="col-span-full text-center text-gray-500">Calculando fluxo...</div>
-        ) : projecaoMensal.length > 0 ? (
-          projecaoMensal.map((item, index) => (
-            <div key={index} className="bg-dark-card border border-dark-border rounded-2xl p-4 shadow-md flex flex-col items-center">
-              <span className="text-xs font-bold text-gray-400 mb-2 bg-white/5 px-3 py-1 rounded-full">{item.mes}</span>
-              <span className="text-lg font-black text-white">{formatarValor(item.valor)}</span>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          {carregando ? (
+            <div className="col-span-full text-center text-gray-500 py-4 text-sm">
+              Calculando fluxo...
             </div>
-          ))
-        ) : (
-          <div className="col-span-full text-center text-gray-500 bg-dark-card py-6 rounded-xl border border-dark-border">
-            Nenhuma comissão projetada.
+          ) : projecaoMensal.length > 0 ? (
+            projecaoMensal.map((item) => (
+              <div
+                key={item.mes}
+                className="bg-black/35 border border-white/5 rounded-2xl p-3.5 flex flex-col items-center text-center"
+              >
+                <span className="text-[11px] font-bold text-gray-400 bg-white/5 px-2.5 py-0.5 rounded-full mb-2">
+                  {item.mes}
+                </span>
+                <span className="text-base font-black text-emerald-400">
+                  {formatarValor(item.confirmado)}
+                </span>
+                <span className="text-[10px] text-emerald-400/75 font-semibold">Confirmado</span>
+                {item.aguardandoCliente > 0 && (
+                  <span className="text-[10px] text-amber-400 mt-1.5 bg-amber-500/10 px-2 py-0.5 rounded">
+                    +{formatarValor(item.aguardandoCliente)} prev.
+                  </span>
+                )}
+              </div>
+            ))
+          ) : (
+            <div className="col-span-full text-center text-gray-500 py-4 text-sm">
+              Nenhuma comissão projetada para os próximos meses.
+            </div>
+          )}
+        </div>
+
+        {/* Atalho integrado de baixa de parcelas >= 2ª */}
+        {parcelasPendentes.length > 0 && (
+          <div className="mt-6 pt-5 border-t border-white/5">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <p className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                <CheckCircle2 size={14} />
+                Aguardando Pagamento do Cliente ({totalParcelasPendentes})
+              </p>
+              {totalParcelasPendentes > 6 && (
+                <button
+                  onClick={() => navigate('/financeiro')}
+                  className="text-xs text-gray-400 hover:text-white underline"
+                >
+                  Ver todas as {totalParcelasPendentes} parcelas
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
+              {parcelasPendentes.map((p) => {
+                const venda = vendasMap[p.vendaId];
+                const clienteId = p.clienteId || venda?.clienteId || '';
+                const nomeCliente = clientesMap[clienteId]?.nomeCompleto || 'Cliente';
+
+                return (
+                  <div
+                    key={p.id}
+                    className="bg-black/40 border border-white/10 px-3.5 py-2.5 rounded-xl flex items-center justify-between gap-3"
+                  >
+                    <div className="min-w-0">
+                      <p
+                        onClick={() => clienteId && navigate(`/clientes/${clienteId}`)}
+                        className="text-xs font-bold text-white truncate hover:text-red-400 cursor-pointer"
+                      >
+                        {nomeCliente}
+                      </p>
+                      <p className="text-[11px] text-gray-400">
+                        {p.numeroParcela}ª parc. • {p.mesAnoReferencia} •{' '}
+                        <strong className="text-emerald-400">{formatarValor(p.valorReceber)}</strong>
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={confirmandoParcelaId === p.id}
+                      onClick={() => handleConfirmarParcelaRapida(p)}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs px-3 py-1.5 rounded-lg inline-flex items-center gap-1 shrink-0 transition-colors"
+                    >
+                      <CheckCircle2 size={13} />
+                      {confirmandoParcelaId === p.id ? '...' : 'Pago'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-4 gap-8 mb-10">
-        <div className="xl:col-span-3 bg-dark-card border border-dark-border rounded-3xl p-6 shadow-lg">
-          <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-6">
-            <BarChart3 className="text-red-600" size={20}/> Análise Preditiva e Esforço ({periodoAtivo})
-          </h3>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <RenderCardPreditivo titulo="Volume de Crédito" categoria="volume" />
-            <RenderCardPreditivo titulo="Salário (Comissão Diluída)" categoria="salario" />
+      {/* 4. METAS & RITMO (COM EDIÇÃO INLINE) + PRÓXIMOS ANIVERSÁRIOS */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        {/* Metas (2/3 da largura) */}
+        <div className="xl:col-span-2 bg-dark-card border border-dark-border rounded-3xl p-6 shadow-lg">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-5">
+            <h2 className="text-base font-bold text-white flex items-center gap-2">
+              <BarChart3 className="text-red-600" size={18} />
+              Metas & Previsão ({periodoAtivo})
+            </h2>
+
+            {isEditingMetas ? (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setIsEditingMetas(false)}
+                  className="text-xs font-bold text-gray-400 hover:text-white bg-white/5 px-3 py-1.5 rounded-full inline-flex items-center gap-1"
+                >
+                  <X size={13} /> Cancelar
+                </button>
+                <button
+                  onClick={salvarMetas}
+                  className="text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 px-3.5 py-1.5 rounded-full inline-flex items-center gap-1"
+                >
+                  <Check size={13} /> Salvar Metas
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setIsEditingMetas(true)}
+                className="text-xs font-bold text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 px-3.5 py-1.5 rounded-full inline-flex items-center gap-1.5 transition-colors"
+              >
+                <Target size={13} className="text-red-500" />
+                <Edit2 size={12} /> Editar Metas
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <RenderCardMeta titulo="Volume de Crédito" categoria="volume" />
+            <RenderCardMeta titulo="Salário (Comissão Diluída)" categoria="salario" />
           </div>
         </div>
 
-        <div className="xl:col-span-1 bg-dark-card border border-dark-border rounded-3xl p-6 shadow-lg">
-          <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-6">
-            <Gift className="text-red-500" size={20}/> Próximos Aniversários
-          </h3>
-          <div className="space-y-3">
+        {/* Próximos Aniversários (1/3 da largura) */}
+        <div className="xl:col-span-1 bg-dark-card border border-dark-border rounded-3xl p-6 shadow-lg flex flex-col justify-between">
+          <div>
+            <h2 className="text-base font-bold text-white flex items-center gap-2 mb-5">
+              <Gift className="text-red-500" size={18} />
+              Próximos Aniversários
+            </h2>
+
             {carregando ? (
               <p className="text-gray-500 text-sm">Buscando...</p>
             ) : proximosAniversariantes.length > 0 ? (
-              proximosAniversariantes.map(cli => (
-                <div key={cli.id} className="flex justify-between items-center bg-black/40 p-3 rounded-lg border border-white/5">
-                  <div>
-                    <p className="text-sm font-bold text-white">{cli.nomeCompleto}</p>
-                    <p className="text-[10px] text-gray-400">{cli.dataNascimento?.split('-').reverse().join('/')}</p>
+              <div className="space-y-2.5">
+                {proximosAniversariantes.map((cli) => (
+                  <div
+                    key={cli.id}
+                    onClick={() => cli.id && navigate(`/clientes/${cli.id}`)}
+                    className="flex justify-between items-center bg-black/35 hover:bg-black/60 cursor-pointer px-3.5 py-2.5 rounded-xl border border-white/5 transition-colors"
+                  >
+                    <div className="min-w-0 pr-2">
+                      <p className="text-xs font-bold text-white truncate">{cli.nomeCompleto}</p>
+                      <p className="text-[10px] text-gray-400">
+                        {cli.dataNascimento?.split('-').reverse().join('/')}
+                      </p>
+                    </div>
+                    <span
+                      className={`text-[11px] font-bold px-2.5 py-1 rounded-lg shrink-0 ${
+                        cli.diasFaltando === 0
+                          ? 'bg-red-500/20 text-red-400'
+                          : 'bg-white/5 text-gray-300'
+                      }`}
+                    >
+                      {cli.diasFaltando === 0 ? 'Hoje! 🎂' : `${cli.diasFaltando}d`}
+                    </span>
                   </div>
-                  <span className={`text-xs font-bold px-2 py-1 rounded ${cli.diasFaltando === 0 ? 'bg-red-500/20 text-red-500' : 'bg-white/10 text-gray-300'}`}>
-                    {cli.diasFaltando === 0 ? 'É HOJE!' : `Faltam ${cli.diasFaltando} dias`}
-                  </span>
-                </div>
-              ))
+                ))}
+              </div>
             ) : (
               <div className="text-center py-8">
-                <Gift className="text-gray-600 mx-auto mb-2 opacity-50" size={32}/>
-                <p className="text-gray-500 text-sm">Sem datas cadastradas.</p>
+                <Gift className="text-gray-600 mx-auto mb-2 opacity-50" size={28} />
+                <p className="text-gray-500 text-xs">Nenhuma data de nascimento cadastrada.</p>
               </div>
             )}
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-dark-card p-6 rounded-3xl border border-dark-border shadow-lg mb-10">
-        <div className="flex justify-between items-center mb-6 border-b border-white/5 pb-4">
-          <h3 className="text-lg font-bold text-white flex items-center gap-2">
-            <Target size={20} className="text-red-600"/> Configuração de Metas ({periodoAtivo})
-          </h3>
-          {isEditingMetas ? (
-            <button onClick={salvarMetas} className="text-emerald-500 hover:text-emerald-400 flex items-center gap-1 text-sm font-bold bg-emerald-500/10 px-4 py-2 rounded-full transition-colors">
-              <Check size={16}/> Salvar
-            </button>
-          ) : (
-            <button onClick={() => setIsEditingMetas(true)} className="text-gray-400 hover:text-white flex items-center gap-1 text-sm font-bold bg-white/5 px-4 py-2 rounded-full transition-colors">
-              <Edit2 size={16}/> Editar Metas
-            </button>
-          )}
-        </div>
-        
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="flex justify-between items-center bg-black/20 p-4 rounded-xl border border-white/5">
-            <h4 className="text-sm font-bold flex items-center gap-2 text-white"><TrendingUp size={16} className="text-red-500"/> Volume de Crédito</h4>
-            {isEditingMetas ? renderInputMeta('volume', periodoAtivo) : <span className="text-lg font-bold text-white">{formatarValor(metas.volume[periodoAtivo])}</span>}
-          </div>
-          <div className="flex justify-between items-center bg-black/20 p-4 rounded-xl border border-white/5">
-            <h4 className="text-sm font-bold flex items-center gap-2 text-white"><Briefcase size={16} className="text-red-500"/> Salário (Mensalidade)</h4>
-            {isEditingMetas ? renderInputMeta('salario', periodoAtivo) : <span className="text-lg font-bold text-white">{formatarValor(metas.salario[periodoAtivo])}</span>}
           </div>
         </div>
       </div>

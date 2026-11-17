@@ -1,11 +1,34 @@
-import { collection, query, where, getDocs, addDoc } from 'firebase/firestore';
+import {
+  collection,
+  query,
+  where,
+  getDocs,
+  addDoc,
+  serverTimestamp,
+} from 'firebase/firestore';
 import { db } from '../config/firebase';
-import { PlanoComissao, ParcelaComissao, TipoCartaConsorcio } from '../types/models';
+import { PlanoComissao } from '../types/models';
 
-// Planos padrão criados automaticamente na primeira utilização
-const PLANOS_INICIAIS: Omit<PlanoComissao, 'id' | 'userId'>[] = [
+// Reexporta o tipo PlanoComissao para facilitar a importação em outras páginas
+export type { PlanoComissao };
+
+/**
+ * Estrutura de cada parcela gerada pelo motor de comissão.
+ */
+export interface ParcelaCalculada {
+  numeroParcela: number;
+  mesAnoReferencia: string;
+  valorReceber: number;
+  status: 'CONFIRMADA' | 'AGUARDANDO_CLIENTE';
+  clientePagou: boolean;
+}
+
+/**
+ * Modelos iniciais criados automaticamente caso o usuário ainda não tenha nenhum plano.
+ */
+const PLANOS_PADRAO: Omit<PlanoComissao, 'id' | 'userId'>[] = [
   {
-    nome: '1,5% em 13 vezes',
+    nome: 'Padrão 1,5% (13 parcelas)',
     percentualBase: 1.5,
     parcelasBase: 13,
     temBonus: false,
@@ -13,7 +36,7 @@ const PLANOS_INICIAIS: Omit<PlanoComissao, 'id' | 'userId'>[] = [
     parcelaBonus: 0,
   },
   {
-    nome: '1,66% em 13 vezes',
+    nome: 'Intermediário 1,66% (13 parcelas)',
     percentualBase: 1.66,
     parcelasBase: 13,
     temBonus: false,
@@ -21,8 +44,8 @@ const PLANOS_INICIAIS: Omit<PlanoComissao, 'id' | 'userId'>[] = [
     parcelaBonus: 0,
   },
   {
-    nome: '2% em 13 vezes + 0,3% na 15ª parcela',
-    percentualBase: 2,
+    nome: 'Especial 2,0% (13x) + 0,3% na 15ª parcela',
+    percentualBase: 2.0,
     parcelasBase: 13,
     temBonus: true,
     percentualBonus: 0.3,
@@ -31,8 +54,39 @@ const PLANOS_INICIAIS: Omit<PlanoComissao, 'id' | 'userId'>[] = [
 ];
 
 /**
- * Busca os planos de comissionamento do usuário no Firebase.
- * Se ainda não houver nenhum cadastrado, cria os 3 planos padrão automaticamente.
+ * Normalizador de planos:
+ * Lê documentos do Firestore (sejam antigos ou novos) e devolve um objeto
+ * padronizado com todos os campos numéricos preenchidos, evitando NaN.
+ */
+function normalizarPlano(id: string, dadosBrutos: Record<string, any>): PlanoComissao {
+  const percentualBase = Number(dadosBrutos.percentualBase ?? dadosBrutos.percentualTotal ?? 0);
+  const parcelasBase = Number(dadosBrutos.parcelasBase ?? dadosBrutos.parcelasRegulares ?? 1);
+  const percentualBonus = Number(dadosBrutos.percentualBonus ?? 0);
+  const parcelaBonus = Number(dadosBrutos.parcelaBonus ?? dadosBrutos.parcelaBonusNumero ?? 0);
+  const temBonus =
+    dadosBrutos.temBonus !== undefined
+      ? Boolean(dadosBrutos.temBonus)
+      : percentualBonus > 0 && parcelaBonus > 0;
+
+  return {
+    id,
+    userId: dadosBrutos.userId || '',
+    nome: dadosBrutos.nome || 'Plano sem nome',
+    percentualBase,
+    parcelasBase,
+    temBonus,
+    percentualBonus,
+    parcelaBonus,
+    // Mantém os campos antigos espelhados caso alguma tela legada ainda os consulte
+    percentualTotal: percentualBase,
+    parcelasRegulares: parcelasBase,
+    parcelaBonusNumero: parcelaBonus,
+  };
+}
+
+/**
+ * Busca os planos de comissão do usuário no Firestore.
+ * Se ainda não existirem, cria automaticamente os 3 planos iniciais.
  */
 export async function buscarOuInicializarPlanos(userId: string): Promise<PlanoComissao[]> {
   if (!userId) return [];
@@ -40,108 +94,125 @@ export async function buscarOuInicializarPlanos(userId: string): Promise<PlanoCo
   const q = query(collection(db, 'planos_comissao'), where('userId', '==', userId));
   const snapshot = await getDocs(q);
 
-  if (snapshot.empty) {
-    const planosCriados: PlanoComissao[] = [];
-    for (const plano of PLANOS_INICIAIS) {
-      const docRef = await addDoc(collection(db, 'planos_comissao'), {
-        ...plano,
-        userId,
-      });
-      planosCriados.push({ id: docRef.id, userId, ...plano });
-    }
-    return planosCriados;
+  if (!snapshot.empty) {
+    const planos = snapshot.docs.map((documento) =>
+      normalizarPlano(documento.id, documento.data())
+    );
+    return planos.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
   }
 
-  return snapshot.docs.map((d) => ({
-    id: d.id,
-    ...(d.data() as Omit<PlanoComissao, 'id'>),
-  }));
+  const criados: PlanoComissao[] = [];
+  for (const plano of PLANOS_PADRAO) {
+    const docRef = await addDoc(collection(db, 'planos_comissao'), {
+      ...plano,
+      userId,
+      createdAt: serverTimestamp(),
+    });
+    criados.push({ id: docRef.id, userId, ...plano });
+  }
+
+  return criados.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
 }
 
 /**
- * Calcula o valor total da comissão, aplica a regra de fechamento do dia 15
- * e monta o cronograma exato de parcelas (incluindo parcela bônus, se houver).
+ * Calcula o cronograma completo de comissões aplicando:
+ * - Regra do dia 15 (venda até dia 15 -> 1º recebimento no mês seguinte; após dia 15 -> 2 meses à frente)
+ * - 1ª parcela já nasce CONFIRMADA (contrato fechado)
+ * - 2ª parcela em diante nasce AGUARDANDO_CLIENTE
+ * - Parcela bônus extra (quando ativada no plano)
  */
 export function calcularCronogramaComissao(
-  valorCarta: number,
+  valorTotalCarta: number,
   dataVendaISO: string,
   plano: PlanoComissao
-) {
-  const comissaoBaseTotal = valorCarta * (plano.percentualBase / 100);
-  const valorParcelaBase = comissaoBaseTotal / Math.max(plano.parcelasBase, 1);
+): {
+  valorComissaoTotal: number;
+  qtdParcelasTotal: number;
+  parcelas: ParcelaCalculada[];
+} {
+  const valorCartaSeguro = Number.isFinite(valorTotalCarta) && valorTotalCarta > 0 ? valorTotalCarta : 0;
+  const dataLimpa =
+    dataVendaISO && dataVendaISO.includes('-')
+      ? dataVendaISO
+      : new Date().toISOString().split('T')[0];
 
-  const comissaoBonusTotal =
-    plano.temBonus && plano.percentualBonus
-      ? valorCarta * (plano.percentualBonus / 100)
-      : 0;
+  const [anoStr, mesStr, diaStr] = dataLimpa.split('-').map(Number);
+  const dia = diaStr || 1;
+  const mesBaseIndex = (mesStr || 1) - 1;
+  const anoBase = anoStr || new Date().getFullYear();
 
-  const valorComissaoTotal = comissaoBaseTotal + comissaoBonusTotal;
+  const planoNormalizado = normalizarPlano(plano.id || '', plano as Record<string, any>);
+  const parcelasBaseSeguras = Math.max(1, planoNormalizado.parcelasBase);
 
-  // Regra do Fechamento Dia 15:
-  // Venda entre dia 01 e 15 -> 1ª parcela no mês seguinte (M + 1)
-  // Venda entre dia 16 e 31 -> 1ª parcela em dois meses (M + 2)
-  const [ano, mes, dia] = dataVendaISO.split('-').map(Number);
-  const mesIndexInicio = dia <= 15 ? mes : mes + 1;
-  const dataPrimeiroRecebimento = new Date(ano, mesIndexInicio, 15, 12, 0, 0);
+  // Regra do dia 15: até dia 15 -> +1 mês; após dia 15 -> +2 meses
+  const deslocamentoInicial = dia <= 15 ? 1 : 2;
 
-  const parcelas: Omit<ParcelaComissao, 'id' | 'vendaId' | 'userId'>[] = [];
+  const comissaoBase = valorCartaSeguro * (planoNormalizado.percentualBase / 100);
+  const valorParcelaRegular = comissaoBase / parcelasBaseSeguras;
 
-  // 1. Gera as parcelas base (ex: 1 a 13)
-  for (let i = 1; i <= plano.parcelasBase; i++) {
-    const dataParcela = new Date(ano, mesIndexInicio + (i - 1), 15);
-    const mesRef = String(dataParcela.getMonth() + 1).padStart(2, '0');
-    const anoRef = dataParcela.getFullYear();
+  const parcelas: ParcelaCalculada[] = [];
+
+  for (let i = 1; i <= parcelasBaseSeguras; i++) {
+    const dataFechamento = new Date(anoBase, mesBaseIndex + deslocamentoInicial + (i - 1), 1);
+    const mesFormatado = `${String(dataFechamento.getMonth() + 1).padStart(2, '0')}/${dataFechamento.getFullYear()}`;
+    const ehPrimeira = i === 1;
 
     parcelas.push({
       numeroParcela: i,
-      valorReceber: valorParcelaBase,
-      mesAnoReferencia: `${mesRef}/${anoRef}`,
-      status: 'PENDENTE',
+      mesAnoReferencia: mesFormatado,
+      valorReceber: Number(valorParcelaRegular.toFixed(2)),
+      status: ehPrimeira ? 'CONFIRMADA' : 'AGUARDANDO_CLIENTE',
+      clientePagou: ehPrimeira,
     });
   }
 
-  // 2. Aplica a parcela bônus (ex: 0,3% na 15ª parcela)
-  if (plano.temBonus && comissaoBonusTotal > 0 && plano.parcelaBonus && plano.parcelaBonus > 0) {
-    const parcelaExistente = parcelas.find((p) => p.numeroParcela === plano.parcelaBonus);
+  let valorComissaoTotal = comissaoBase;
+  let qtdParcelasTotal = parcelasBaseSeguras;
 
-    if (parcelaExistente) {
-      parcelaExistente.valorReceber += comissaoBonusTotal;
-    } else {
-      const dataBonus = new Date(ano, mesIndexInicio + (plano.parcelaBonus - 1), 15);
-      const mesBonus = String(dataBonus.getMonth() + 1).padStart(2, '0');
-      const anoBonus = dataBonus.getFullYear();
+  const possuiBonusValido =
+    planoNormalizado.temBonus &&
+    (planoNormalizado.percentualBonus ?? 0) > 0 &&
+    (planoNormalizado.parcelaBonus ?? 0) > 0;
 
-      parcelas.push({
-        numeroParcela: plano.parcelaBonus,
-        valorReceber: comissaoBonusTotal,
-        mesAnoReferencia: `${mesBonus}/${anoBonus}`,
-        status: 'PENDENTE',
-      });
-    }
+  if (possuiBonusValido) {
+    const percentualBonus = planoNormalizado.percentualBonus!;
+    const numeroParcelaBonus = planoNormalizado.parcelaBonus!;
+
+    const valorBonus = valorCartaSeguro * (percentualBonus / 100);
+    const dataBonus = new Date(
+      anoBase,
+      mesBaseIndex + deslocamentoInicial + (numeroParcelaBonus - 1),
+      1
+    );
+    const mesBonusFormatado = `${String(dataBonus.getMonth() + 1).padStart(2, '0')}/${dataBonus.getFullYear()}`;
+
+    parcelas.push({
+      numeroParcela: numeroParcelaBonus,
+      mesAnoReferencia: mesBonusFormatado,
+      valorReceber: Number(valorBonus.toFixed(2)),
+      status: 'AGUARDANDO_CLIENTE',
+      clientePagou: false,
+    });
+
+    valorComissaoTotal += valorBonus;
+    qtdParcelasTotal += 1;
   }
 
-  const totalParcelasGeradas = Math.max(
-    plano.parcelasBase,
-    plano.temBonus && plano.parcelaBonus ? plano.parcelaBonus : 0
-  );
-
   return {
-    valorComissaoTotal,
-    dataPrimeiroRecebimento,
-    totalParcelasGeradas,
+    valorComissaoTotal: Number(valorComissaoTotal.toFixed(2)),
+    qtdParcelasTotal,
     parcelas,
   };
 }
 
 /**
- * Função única para registrar a Venda e todas as suas Parcelas no Firestore.
- * Usada tanto na conversão do Lead quanto no módulo Financeiro.
+ * Grava a venda e todas as suas parcelas de comissão no Firestore em uma operação unificada.
  */
 export async function registrarVendaUnificada(params: {
   userId: string;
   clienteId: string;
   valorTotalCarta: number;
-  tipoCarta: TipoCartaConsorcio;
+  tipoCarta: string;
   grupo: string;
   cota: string;
   dataVendaISO: string;
@@ -149,32 +220,48 @@ export async function registrarVendaUnificada(params: {
 }) {
   const { userId, clienteId, valorTotalCarta, tipoCarta, grupo, cota, dataVendaISO, plano } = params;
 
-  const calculo = calcularCronogramaComissao(valorTotalCarta, dataVendaISO, plano);
-  const dataVendaObj = new Date(`${dataVendaISO}T12:00:00`);
+  const cronograma = calcularCronogramaComissao(valorTotalCarta, dataVendaISO, plano);
+
+  if (
+    Number.isNaN(cronograma.valorComissaoTotal) ||
+    cronograma.valorComissaoTotal <= 0 ||
+    cronograma.parcelas.length === 0
+  ) {
+    throw new Error('Não foi possível calcular a comissão. Verifique os valores da carta e do plano.');
+  }
+
+  const [ano, mes, dia] = dataVendaISO.split('-').map(Number);
+  const dataVendaObj = new Date(ano, mes - 1, dia, 12, 0, 0);
 
   const vendaRef = await addDoc(collection(db, 'vendas'), {
     userId,
     clienteId,
     valorTotalCarta,
     tipoCarta,
-    grupo: grupo.trim(),
-    cota: cota.trim(),
+    grupo,
+    cota,
     dataVenda: dataVendaObj,
+    valorComissaoTotal: cronograma.valorComissaoTotal,
     planoComissaoId: plano.id || '',
     planoComissaoNome: plano.nome,
-    taxaAplicadaNaVenda: plano.percentualBase,
-    valorComissaoTotal: calculo.valorComissaoTotal,
-    qtdParcelasComissao: calculo.totalParcelasGeradas,
-    dataPrimeiroRecebimento: calculo.dataPrimeiroRecebimento,
+    qtdParcelasComissao: cronograma.qtdParcelasTotal,
+    createdAt: serverTimestamp(),
   });
 
-  for (const parcela of calculo.parcelas) {
-    await addDoc(collection(db, 'parcelas'), {
+  const gravacoesParcelas = cronograma.parcelas.map((parc) =>
+    addDoc(collection(db, 'parcelas'), {
       userId,
       vendaId: vendaRef.id,
-      ...parcela,
-    });
-  }
+      clienteId,
+      numeroParcela: parc.numeroParcela,
+      mesAnoReferencia: parc.mesAnoReferencia,
+      valorReceber: parc.valorReceber,
+      status: parc.status,
+      clientePagou: parc.clientePagou,
+      dataConfirmacaoPagamento: parc.clientePagou ? dataVendaISO : '',
+    })
+  );
 
+  await Promise.all(gravacoesParcelas);
   return vendaRef.id;
 }
