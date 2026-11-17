@@ -5,7 +5,7 @@ import {
     AlertCircle, FileText, Target, RefreshCw,
     Trash2, Edit2, X, Tag, DollarSign, UserCheck,
     MessageSquarePlus, BellRing, History, Search,
-    Users, TrendingUp, Filter
+    Users, TrendingUp, Filter, Receipt
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAuthStore } from '../../store/useAuthStore';
@@ -76,10 +76,47 @@ function calcularDiasDiferenca(dataISO) {
     return Math.floor((hoje.getTime() - alvo.getTime()) / (1000 * 60 * 60 * 24));
 }
 
+// Retorna a competência sugerida ('ATUAL' até dia 15, 'PROXIMO' após dia 15)
+function sugerirCompetenciaNota(dataISO) {
+    if (!dataISO || !dataISO.includes('-')) return 'ATUAL';
+    const dia = Number(dataISO.split('-')[2]);
+    return dia <= 15 ? 'ATUAL' : 'PROXIMO';
+}
+
+// Calcula os rótulos legíveis dos meses da nota e do 1º recebimento sem risco de fuso horário
+function obterDetalhesCompetenciaNota(dataISO) {
+    if (!dataISO || !dataISO.includes('-')) {
+        return {
+            mesNotaAtual: 'Mês da Venda',
+            mesRecebimentoAtual: 'Mês Seguinte',
+            mesNotaProximo: 'Próximo Mês',
+            mesRecebimentoProximo: 'Em 2 Meses'
+        };
+    }
+
+    const [anoStr, mesStr] = dataISO.split('-');
+    const ano = Number(anoStr);
+    const mesIndex = Number(mesStr) - 1; // 0 = Janeiro ... 11 = Dezembro
+
+    const formatarMesAno = (offsetMeses) => {
+        const dataRef = new Date(ano, mesIndex + offsetMeses, 1);
+        const nomeMes = dataRef.toLocaleDateString('pt-BR', { month: 'long' });
+        const nomeCapitalizado = nomeMes.charAt(0).toUpperCase() + nomeMes.slice(1);
+        return `${nomeCapitalizado}/${dataRef.getFullYear()}`;
+    };
+
+    return {
+        mesNotaAtual: formatarMesAno(0),
+        mesRecebimentoAtual: formatarMesAno(1),
+        mesNotaProximo: formatarMesAno(1),
+        mesRecebimentoProximo: formatarMesAno(2)
+    };
+}
+
 // ============================================================================
 // 2. CONSTANTES E ATALHOS CONFIGURÁVEIS
 // ============================================================================
-const DIAS_ALERTA_INATIVIDADE = 3; // Dias sem interação para destacar alerta no card
+const DIAS_ALERTA_INATIVIDADE = 3;
 
 const ORIGENS_LEAD = ['Network', 'Rede Social', 'Indicação', 'Recompra', 'Outro'];
 
@@ -116,7 +153,7 @@ export default function LeadsPage() {
     const [origemFiltro, setOrigemFiltro] = useState('TODAS');
     const [apenasFollowUpUrgente, setApenasFollowUpUrgente] = useState(false);
 
-    // Formulário de Novo Lead (agora exibido em Modal dedicado)
+    // Formulário de Novo Lead (Modal dedicado)
     const [novoLead, setNovoLead] = useState({
         nome: '',
         telefone: '',
@@ -128,7 +165,6 @@ export default function LeadsPage() {
     const [novaAnotacao, setNovaAnotacao] = useState('');
 
     // Controles dos Modais
-    // Valores possíveis: 'novoLead' | 'contato' | 'proposta' | 'fechado' | 'converter' | 'reuniaoManual' | 'followup'
     const [modalAtivo, setModalAtivo] = useState(null);
     const [leadSelecionado, setLeadSelecionado] = useState(null);
 
@@ -170,6 +206,7 @@ export default function LeadsPage() {
         tipoCarta: 'Imobiliária',
         valorTotalCarta: '',
         dataVenda: dataHojeISO,
+        competenciaNota: sugerirCompetenciaNota(dataHojeISO), // 'ATUAL' | 'PROXIMO'
         grupo: '',
         cota: '',
         planoComissaoId: ''
@@ -542,7 +579,7 @@ export default function LeadsPage() {
     };
 
     // ========================================================================
-    // 7. CONVERSÃO FINAL (CLIENTE + VENDA + PARCELAS)
+    // 7. CONVERSÃO FINAL (CLIENTE + VENDA + PARCELAS + COMPETÊNCIA DA NOTA)
     // ========================================================================
     const abrirModalConversao = (lead) => {
         setLeadSelecionado(lead);
@@ -555,11 +592,21 @@ export default function LeadsPage() {
             tipoCarta: 'Imobiliária',
             valorTotalCarta: lead.valorFechado || '',
             dataVenda: dataHojeISO,
+            competenciaNota: sugerirCompetenciaNota(dataHojeISO),
             grupo: '',
             cota: '',
             planoComissaoId: planosComissao[0]?.id || ''
         });
         setModalAtivo('converter');
+    };
+
+    // Atualiza a data da venda e já ajusta a sugestão padrão da nota (que o usuário pode alterar livremente)
+    const handleAlterarDataVendaConversao = (novaDataISO) => {
+        setFormConversao((prev) => ({
+            ...prev,
+            dataVenda: novaDataISO,
+            competenciaNota: sugerirCompetenciaNota(novaDataISO)
+        }));
     };
 
     const confirmarConversaoClienteEVenda = async (e) => {
@@ -579,7 +626,8 @@ export default function LeadsPage() {
         const calculoTeste = calcularCronogramaComissao(
             valorCartaNum,
             formConversao.dataVenda,
-            planoEscolhido
+            planoEscolhido,
+            formConversao.competenciaNota
         );
 
         if (
@@ -629,7 +677,8 @@ export default function LeadsPage() {
                 grupo: formConversao.grupo,
                 cota: formConversao.cota,
                 dataVendaISO: formConversao.dataVenda,
-                plano: planoEscolhido
+                plano: planoEscolhido,
+                competenciaNota: formConversao.competenciaNota
             });
 
             await deleteDoc(doc(db, 'leads', leadSelecionado.id));
@@ -649,9 +698,16 @@ export default function LeadsPage() {
 
     const planoSelecionadoAtual = planosComissao.find(p => p.id === formConversao.planoComissaoId);
     const valorCartaPreview = moedaParaNumero(formConversao.valorTotalCarta);
+    const detalhesNotaPreview = obterDetalhesCompetenciaNota(formConversao.dataVenda);
+
     const simulacaoPreview =
         planoSelecionadoAtual && valorCartaPreview > 0 && formConversao.dataVenda
-            ? calcularCronogramaComissao(valorCartaPreview, formConversao.dataVenda, planoSelecionadoAtual)
+            ? calcularCronogramaComissao(
+                  valorCartaPreview,
+                  formConversao.dataVenda,
+                  planoSelecionadoAtual,
+                  formConversao.competenciaNota
+              )
             : null;
 
     // ========================================================================
@@ -886,7 +942,6 @@ export default function LeadsPage() {
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2">
-                            {/* Busca por nome ou telefone */}
                             <div className="relative w-full sm:w-56">
                                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                                 <input
@@ -907,7 +962,6 @@ export default function LeadsPage() {
                                 )}
                             </div>
 
-                            {/* Filtro por Origem */}
                             <div className="flex items-center gap-1.5 bg-black/50 border border-white/10 rounded-xl px-3 py-1.5">
                                 <Filter size={13} className="text-gray-400" />
                                 <select
@@ -922,7 +976,6 @@ export default function LeadsPage() {
                                 </select>
                             </div>
 
-                            {/* Botão de Follow-ups Urgentes */}
                             <button
                                 type="button"
                                 onClick={() => setApenasFollowUpUrgente(!apenasFollowUpUrgente)}
@@ -957,7 +1010,6 @@ export default function LeadsPage() {
 
                 {/* BARRA LATERAL DIREITA: REUNIÕES + LEMBRETES RÁPIDOS */}
                 <div className="lg:col-span-4 xl:col-span-3 flex flex-col gap-6 sticky top-6">
-                    {/* Card de Reuniões */}
                     <div className="bg-dark-card border border-dark-border p-5 rounded-3xl shadow-lg flex flex-col max-h-[44vh]">
                         <div className="flex items-center justify-between border-b border-white/5 pb-3.5 mb-3.5 shrink-0">
                             <h3 className="text-base font-bold text-white flex items-center gap-2">
@@ -1024,7 +1076,6 @@ export default function LeadsPage() {
                         </button>
                     </div>
 
-                    {/* Card de Lembretes Rápidos */}
                     <div className="bg-dark-card border border-dark-border p-5 rounded-3xl shadow-lg flex flex-col flex-1 max-h-[44vh]">
                         <h3 className="text-base font-bold text-white flex items-center gap-2 mb-3.5 border-b border-white/5 pb-3.5 shrink-0">
                             <StickyNote className="text-red-600" size={18} /> Lembretes Rápidos
@@ -1470,7 +1521,7 @@ export default function LeadsPage() {
             )}
 
             {/* ====================================================================
-                MODAL 5: CONVERSÃO FINAL (REGISTRAR VENDA & COMISSÃO)
+                MODAL 5: CONVERSÃO FINAL (REGISTRAR VENDA & COMPETÊNCIA DA NOTA)
             ==================================================================== */}
             {modalAtivo === 'converter' && leadSelecionado && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 overflow-y-auto">
@@ -1481,10 +1532,11 @@ export default function LeadsPage() {
                             {formConversao.clienteExistenteId ? 'Registrar Nova Venda (Recompra)' : 'Converter em Cliente & Registrar Venda'}
                         </h2>
                         <p className="text-xs text-gray-400 mb-6">
-                            Confira os dados do cliente e informe os detalhes da carta vendida para <strong className="text-white">{formConversao.nomeCompleto}</strong>.
+                            Confira os dados do cliente, informe os detalhes da carta e escolha em qual fechamento de nota a venda entrou.
                         </p>
 
                         <form onSubmit={confirmarConversaoClienteEVenda} className="flex flex-col gap-5">
+                            {/* BLOCO 1: DADOS DO CLIENTE */}
                             <div className="bg-black/30 border border-white/5 p-4 rounded-2xl">
                                 <div className="flex justify-between items-center mb-3">
                                     <h3 className="text-xs font-black uppercase tracking-wider text-red-500">1. Dados do Cliente</h3>
@@ -1514,6 +1566,7 @@ export default function LeadsPage() {
                                 </div>
                             </div>
 
+                            {/* BLOCO 2: DADOS DA VENDA & COMPETÊNCIA DA NOTA */}
                             <div className="bg-black/30 border border-white/5 p-4 rounded-2xl">
                                 <h3 className="text-xs font-black uppercase tracking-wider text-emerald-400 mb-3">2. Registro da Venda & Comissionamento</h3>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
@@ -1531,11 +1584,17 @@ export default function LeadsPage() {
                                     </div>
                                     <div>
                                         <label className="block text-xs text-gray-400 mb-1">Data da Venda *</label>
-                                        <input required type="date" value={formConversao.dataVenda} onChange={e => setFormConversao({ ...formConversao, dataVenda: e.target.value })} className="w-full bg-black/50 border border-white/10 rounded-lg p-2.5 text-sm text-white outline-none focus:border-emerald-500" />
+                                        <input
+                                            required
+                                            type="date"
+                                            value={formConversao.dataVenda}
+                                            onChange={e => handleAlterarDataVendaConversao(e.target.value)}
+                                            className="w-full bg-black/50 border border-white/10 rounded-lg p-2.5 text-sm text-white outline-none focus:border-emerald-500"
+                                        />
                                     </div>
                                 </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
                                     <div>
                                         <label className="block text-xs text-gray-400 mb-1">Grupo *</label>
                                         <input required type="text" placeholder="Ex: 1050" value={formConversao.grupo} onChange={e => setFormConversao({ ...formConversao, grupo: e.target.value })} className="w-full bg-black/50 border border-white/10 rounded-lg p-2.5 text-sm text-white outline-none focus:border-emerald-500" />
@@ -1559,6 +1618,50 @@ export default function LeadsPage() {
                                     </div>
                                 </div>
 
+                                {/* SELETOR DE FECHAMENTO DE NOTA (MÊS ATUAL VS PRÓXIMO MÊS) */}
+                                <div className="bg-black/40 border border-white/10 p-3.5 rounded-2xl">
+                                    <label className="text-xs font-bold text-gray-300 mb-2 flex items-center gap-1.5">
+                                        <Receipt size={14} className="text-amber-400" />
+                                        Em qual fechamento de nota esta venda entrou? *
+                                    </label>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                        <button
+                                            type="button"
+                                            onClick={() => setFormConversao({ ...formConversao, competenciaNota: 'ATUAL' })}
+                                            className={`p-3 rounded-xl border text-left transition-all ${
+                                                formConversao.competenciaNota === 'ATUAL'
+                                                    ? 'bg-emerald-500/15 border-emerald-500 text-white shadow'
+                                                    : 'bg-black/40 border-white/10 text-gray-400 hover:border-white/25'
+                                            }`}
+                                        >
+                                            <span className="block text-xs font-black">
+                                                Nota de {detalhesNotaPreview.mesNotaAtual}
+                                            </span>
+                                            <span className="block text-[11px] text-emerald-400 mt-0.5">
+                                                1º recebimento: {detalhesNotaPreview.mesRecebimentoAtual}
+                                            </span>
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            onClick={() => setFormConversao({ ...formConversao, competenciaNota: 'PROXIMO' })}
+                                            className={`p-3 rounded-xl border text-left transition-all ${
+                                                formConversao.competenciaNota === 'PROXIMO'
+                                                    ? 'bg-amber-500/15 border-amber-500 text-white shadow'
+                                                    : 'bg-black/40 border-white/10 text-gray-400 hover:border-white/25'
+                                            }`}
+                                        >
+                                            <span className="block text-xs font-black">
+                                                Nota de {detalhesNotaPreview.mesNotaProximo}
+                                            </span>
+                                            <span className="block text-[11px] text-amber-400 mt-0.5">
+                                                1º recebimento: {detalhesNotaPreview.mesRecebimentoProximo}
+                                            </span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* PRÉVIA DE COMISSÃO E 1º RECEBIMENTO */}
                                 {simulacaoPreview && (
                                     Number.isNaN(simulacaoPreview.valorComissaoTotal) ? (
                                         <div className="mt-3 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-400 font-medium">
@@ -1572,8 +1675,8 @@ export default function LeadsPage() {
                                                     {simulacaoPreview.valorComissaoTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                                                 </strong>
                                             </span>
-                                            <span className="text-gray-400">
-                                                1º Recebimento (regra dia 15):{' '}
+                                            <span className="text-gray-300">
+                                                1º Recebimento:{' '}
                                                 <strong className="text-white">
                                                     {simulacaoPreview.parcelas?.[0]?.mesAnoReferencia || 'Não definido'}
                                                 </strong>
@@ -1701,7 +1804,6 @@ function renderKanbanColumn(
                                             : 'border-dark-border hover:border-red-500/30'
                                 }`}
                             >
-                                {/* Botões de Ação no topo do card */}
                                 <div className="absolute top-3 right-3 flex gap-1">
                                     <button
                                         onClick={() => abrirModalFollowUp(lead)}

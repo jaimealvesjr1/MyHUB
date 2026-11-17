@@ -5,6 +5,13 @@
 export type TipoCartaConsorcio = 'Imobiliária' | 'Automotiva' | 'Serviços' | string;
 
 /**
+ * Define em qual fechamento de nota fiscal a venda foi faturada:
+ * - 'ATUAL': entra na nota do próprio mês da venda (1º recebimento no mês seguinte).
+ * - 'PROXIMO': entra na nota do mês seguinte à venda (1º recebimento em 2 meses).
+ */
+export type CompetenciaNota = 'ATUAL' | 'PROXIMO';
+
+/**
  * Estrutura de um plano/regra de comissionamento do consultor.
  */
 export interface PlanoComissao {
@@ -50,6 +57,7 @@ export interface VendaConsorcio {
   grupo: string;
   cota: string;
   dataVenda: any;
+  competenciaNota?: CompetenciaNota; // Define se a venda entrou na nota do mês atual ou do próximo
   valorComissaoTotal: number;
   planoComissaoId?: string;
   planoComissaoNome?: string;

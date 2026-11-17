@@ -7,10 +7,10 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
-import { PlanoComissao } from '../types/models';
+import { PlanoComissao, CompetenciaNota } from '../types/models';
 
 // Reexporta o tipo PlanoComissao para facilitar a importação em outras páginas
-export type { PlanoComissao };
+export type { PlanoComissao, CompetenciaNota };
 
 /**
  * Estrutura de cada parcela gerada pelo motor de comissão.
@@ -25,6 +25,7 @@ export interface ParcelaCalculada {
 
 /**
  * Modelos iniciais criados automaticamente caso o usuário ainda não tenha nenhum plano.
+ * Você pode ajustar os nomes, percentuais ou quantidades de parcelas aqui se desejar.
  */
 const PLANOS_PADRAO: Omit<PlanoComissao, 'id' | 'userId'>[] = [
   {
@@ -56,7 +57,7 @@ const PLANOS_PADRAO: Omit<PlanoComissao, 'id' | 'userId'>[] = [
 /**
  * Normalizador de planos:
  * Lê documentos do Firestore (sejam antigos ou novos) e devolve um objeto
- * padronizado com todos os campos numéricos preenchidos, evitando NaN.
+ * padronizado com todos os campos numéricos preenchidos, evitando erros de cálculo (NaN).
  */
 function normalizarPlano(id: string, dadosBrutos: Record<string, any>): PlanoComissao {
   const percentualBase = Number(dadosBrutos.percentualBase ?? dadosBrutos.percentualTotal ?? 0);
@@ -116,21 +117,27 @@ export async function buscarOuInicializarPlanos(userId: string): Promise<PlanoCo
 
 /**
  * Calcula o cronograma completo de comissões aplicando:
- * - Regra do dia 15 (venda até dia 15 -> 1º recebimento no mês seguinte; após dia 15 -> 2 meses à frente)
- * - 1ª parcela já nasce CONFIRMADA (contrato fechado)
- * - 2ª parcela em diante nasce AGUARDANDO_CLIENTE
- * - Parcela bônus extra (quando ativada no plano)
+ * - Competência da Nota ('ATUAL' -> +1 mês | 'PROXIMO' -> +2 meses).
+ *   Caso não seja informada, aplica a regra padrão: até dia 15 -> 'ATUAL', após dia 15 -> 'PROXIMO'.
+ * - 1ª parcela já nasce CONFIRMADA (contrato fechado).
+ * - 2ª parcela em diante nasce AGUARDANDO_CLIENTE.
+ * - Parcela bônus extra (quando ativada no plano).
  */
 export function calcularCronogramaComissao(
   valorTotalCarta: number,
   dataVendaISO: string,
-  plano: PlanoComissao
+  plano: PlanoComissao,
+  competenciaNota?: CompetenciaNota
 ): {
   valorComissaoTotal: number;
   qtdParcelasTotal: number;
   parcelas: ParcelaCalculada[];
 } {
-  const valorCartaSeguro = Number.isFinite(valorTotalCarta) && valorTotalCarta > 0 ? valorTotalCarta : 0;
+  // 1. Garante que o valor da carta seja um número positivo válido
+  const valorCartaSeguro =
+    Number.isFinite(valorTotalCarta) && valorTotalCarta > 0 ? valorTotalCarta : 0;
+
+  // 2. Extrai ano, mês e dia da data da venda no formato AAAA-MM-DD
   const dataLimpa =
     dataVendaISO && dataVendaISO.includes('-')
       ? dataVendaISO
@@ -138,20 +145,25 @@ export function calcularCronogramaComissao(
 
   const [anoStr, mesStr, diaStr] = dataLimpa.split('-').map(Number);
   const dia = diaStr || 1;
-  const mesBaseIndex = (mesStr || 1) - 1;
+  const mesBaseIndex = (mesStr || 1) - 1; // No JavaScript, Janeiro = 0 e Dezembro = 11
   const anoBase = anoStr || new Date().getFullYear();
 
+  // 3. Padroniza os dados do plano escolhido
   const planoNormalizado = normalizarPlano(plano.id || '', plano as Record<string, any>);
   const parcelasBaseSeguras = Math.max(1, planoNormalizado.parcelasBase);
 
-  // Regra do dia 15: até dia 15 -> +1 mês; após dia 15 -> +2 meses
-  const deslocamentoInicial = dia <= 15 ? 1 : 2;
+  // 4. Define em qual mês cairá a 1ª parcela com base na escolha da nota (ou regra do dia 15)
+  const competenciaEfetiva: CompetenciaNota =
+    competenciaNota ?? (dia <= 15 ? 'ATUAL' : 'PROXIMO');
+  const deslocamentoInicial = competenciaEfetiva === 'ATUAL' ? 1 : 2;
 
+  // 5. Calcula o valor total da comissão base e o valor de cada parcela regular
   const comissaoBase = valorCartaSeguro * (planoNormalizado.percentualBase / 100);
   const valorParcelaRegular = comissaoBase / parcelasBaseSeguras;
 
   const parcelas: ParcelaCalculada[] = [];
 
+  // 6. Gera todas as parcelas regulares mês a mês
   for (let i = 1; i <= parcelasBaseSeguras; i++) {
     const dataFechamento = new Date(anoBase, mesBaseIndex + deslocamentoInicial + (i - 1), 1);
     const mesFormatado = `${String(dataFechamento.getMonth() + 1).padStart(2, '0')}/${dataFechamento.getFullYear()}`;
@@ -169,6 +181,7 @@ export function calcularCronogramaComissao(
   let valorComissaoTotal = comissaoBase;
   let qtdParcelasTotal = parcelasBaseSeguras;
 
+  // 7. Verifica se o plano possui parcela bônus e a adiciona no mês correspondente
   const possuiBonusValido =
     planoNormalizado.temBonus &&
     (planoNormalizado.percentualBonus ?? 0) > 0 &&
@@ -217,10 +230,34 @@ export async function registrarVendaUnificada(params: {
   cota: string;
   dataVendaISO: string;
   plano: PlanoComissao;
+  competenciaNota?: CompetenciaNota;
 }) {
-  const { userId, clienteId, valorTotalCarta, tipoCarta, grupo, cota, dataVendaISO, plano } = params;
+  const {
+    userId,
+    clienteId,
+    valorTotalCarta,
+    tipoCarta,
+    grupo,
+    cota,
+    dataVendaISO,
+    plano,
+    competenciaNota,
+  } = params;
 
-  const cronograma = calcularCronogramaComissao(valorTotalCarta, dataVendaISO, plano);
+  const [ano, mes, dia] = dataVendaISO.split('-').map(Number);
+  const diaSeguro = dia || 1;
+
+  // Define a competência final (manual ou automática pela regra do dia 15)
+  const competenciaFinal: CompetenciaNota =
+    competenciaNota ?? (diaSeguro <= 15 ? 'ATUAL' : 'PROXIMO');
+
+  // 1. Calcula todo o cronograma de parcelas antes de gravar no banco
+  const cronograma = calcularCronogramaComissao(
+    valorTotalCarta,
+    dataVendaISO,
+    plano,
+    competenciaFinal
+  );
 
   if (
     Number.isNaN(cronograma.valorComissaoTotal) ||
@@ -230,9 +267,10 @@ export async function registrarVendaUnificada(params: {
     throw new Error('Não foi possível calcular a comissão. Verifique os valores da carta e do plano.');
   }
 
-  const [ano, mes, dia] = dataVendaISO.split('-').map(Number);
-  const dataVendaObj = new Date(ano, mes - 1, dia, 12, 0, 0);
+  // Cria o objeto Date ao meio-dia para evitar deslocamento de fuso horário
+  const dataVendaObj = new Date(ano, mes - 1, diaSeguro, 12, 0, 0);
 
+  // 2. Grava o documento principal da venda na coleção 'vendas'
   const vendaRef = await addDoc(collection(db, 'vendas'), {
     userId,
     clienteId,
@@ -241,6 +279,7 @@ export async function registrarVendaUnificada(params: {
     grupo,
     cota,
     dataVenda: dataVendaObj,
+    competenciaNota: competenciaFinal,
     valorComissaoTotal: cronograma.valorComissaoTotal,
     planoComissaoId: plano.id || '',
     planoComissaoNome: plano.nome,
@@ -248,6 +287,7 @@ export async function registrarVendaUnificada(params: {
     createdAt: serverTimestamp(),
   });
 
+  // 3. Grava todas as parcelas vinculadas ao ID da venda recém-criada
   const gravacoesParcelas = cronograma.parcelas.map((parc) =>
     addDoc(collection(db, 'parcelas'), {
       userId,

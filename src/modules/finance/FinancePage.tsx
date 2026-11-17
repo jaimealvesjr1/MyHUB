@@ -43,7 +43,6 @@ export default function FinancePage() {
   // ============================================================================
   // 2. ESTADOS DE NAVEGAÇÃO, MODAL E BUSCA GLOBAL
   // ============================================================================
-  // Define 'VENDAS' como aba inicial padrão ao abrir a página
   const [abaAtiva, setAbaAtiva] = useState<'VENDAS' | 'PARCELAS'>('VENDAS');
   const [modalFormularioAberto, setModalFormularioAberto] = useState(false);
   const [vendaEmEdicao, setVendaEmEdicao] = useState<VendaConsorcio | null>(null);
@@ -115,10 +114,6 @@ export default function FinancePage() {
     });
   };
 
-  /**
-   * Converte qualquer formato de data salvo no Firebase (Timestamp, Date ou texto)
-   * para um objeto Date válido do JavaScript.
-   */
   const converterParaDate = (dataVenda: any): Date | null => {
     if (!dataVenda) return null;
     if (dataVenda instanceof Date) {
@@ -140,9 +135,6 @@ export default function FinancePage() {
     return isNaN(d.getTime()) ? null : d;
   };
 
-  /**
-   * Retorna a data no formato 'AAAA-MM-DD' para comparação segura de períodos.
-   */
   const extrairDataISO = (dataVenda: any): string => {
     const d = converterParaDate(dataVenda);
     if (!d) return '';
@@ -152,9 +144,6 @@ export default function FinancePage() {
     return `${ano}-${mes}-${dia}`;
   };
 
-  /**
-   * Retorna o mês/ano no formato 'MM/AAAA' para o filtro mensal.
-   */
   const extrairMesAno = (dataVenda: any): string => {
     const d = converterParaDate(dataVenda);
     if (!d) return '';
@@ -167,6 +156,17 @@ export default function FinancePage() {
     const d = converterParaDate(dataVenda);
     if (!d) return '-';
     return d.toLocaleDateString('pt-BR');
+  };
+
+  // Retorna o mês/ano da nota fiscal em que a venda entrou (ex: "Nota 11/2026")
+  const obterRotuloNotaVenda = (venda: VendaConsorcio): string => {
+    const d = converterParaDate(venda.dataVenda);
+    if (!d) return '';
+    const compSalva = (venda as any).competenciaNota;
+    const entraNoMesAtual = compSalva ? compSalva === 'ATUAL' : d.getDate() <= 15;
+    const dataNota = new Date(d.getFullYear(), d.getMonth() + (entraNoMesAtual ? 0 : 1), 1);
+    const mes = String(dataNota.getMonth() + 1).padStart(2, '0');
+    return `Nota ${mes}/${dataNota.getFullYear()}`;
   };
 
   // ============================================================================
@@ -243,7 +243,6 @@ export default function FinancePage() {
   // ============================================================================
   // 8. OPÇÕES DINÂMICAS E FILTRAGEM DO HISTÓRICO DE VENDAS
   // ============================================================================
-  // Lista de meses únicos das vendas (ordenados do mais recente para o mais antigo)
   const mesesVendaDisponiveis = useMemo(() => {
     const unicos = Array.from(new Set(vendas.map((v) => extrairMesAno(v.dataVenda)).filter(Boolean)));
     return unicos.sort((a, b) => {
@@ -253,7 +252,6 @@ export default function FinancePage() {
     });
   }, [vendas]);
 
-  // Lista de tipos de carta únicos cadastrados nas vendas
   const tiposCartaDisponiveis = useMemo(() => {
     const unicos = Array.from(
       new Set(vendas.map((v) => (v.tipoCarta || '').trim()).filter(Boolean))
@@ -261,23 +259,19 @@ export default function FinancePage() {
     return unicos.sort((a, b) => a.localeCompare(b, 'pt-BR'));
   }, [vendas]);
 
-  // Lista de grupos únicos cadastrados nas vendas
   const gruposDisponiveis = useMemo(() => {
     const unicos = Array.from(new Set(vendas.map((v) => (v.grupo || '').trim()).filter(Boolean)));
     return unicos.sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
   }, [vendas]);
 
-  // Aplica todos os filtros selecionados sobre o histórico de vendas
   const vendasFiltradas = useMemo(() => {
     const termo = buscaTexto.trim().toLowerCase();
 
     return vendas.filter((v) => {
-      // 1. Filtro por Mês (MM/AAAA)
       if (mesVendaFiltro !== 'TODOS' && extrairMesAno(v.dataVenda) !== mesVendaFiltro) {
         return false;
       }
 
-      // 2. Filtro por Período (Data Inicial e Data Final)
       const dataISO = extrairDataISO(v.dataVenda);
       if (dataInicioFiltro && (!dataISO || dataISO < dataInicioFiltro)) {
         return false;
@@ -286,17 +280,14 @@ export default function FinancePage() {
         return false;
       }
 
-      // 3. Filtro por Tipo de Carta
       if (tipoCartaFiltro !== 'TODOS' && (v.tipoCarta || '').trim() !== tipoCartaFiltro) {
         return false;
       }
 
-      // 4. Filtro por Grupo
       if (grupoFiltro !== 'TODOS' && (v.grupo || '').trim() !== grupoFiltro) {
         return false;
       }
 
-      // 5. Filtro por Texto Livre (Cliente, Grupo ou Cota)
       if (termo) {
         const nomeCli = getNomeCliente(v.clienteId).toLowerCase();
         const grupo = (v.grupo || '').toLowerCase();
@@ -325,7 +316,6 @@ export default function FinancePage() {
     clientes,
   ]);
 
-  // Verifica se existe algum filtro ativo nas vendas
   const temFiltroVendaAtivo =
     mesVendaFiltro !== 'TODOS' ||
     dataInicioFiltro !== '' ||
@@ -344,7 +334,7 @@ export default function FinancePage() {
   };
 
   // ============================================================================
-  // 9. SOMATÓRIAS DINÂMICAS (Baseadas nas vendas filtradas + KPIs gerais)
+  // 9. SOMATÓRIAS DINÂMICAS
   // ============================================================================
   const somatoriasVendasFiltradas = useMemo(() => {
     const quantidade = vendasFiltradas.length;
@@ -503,7 +493,7 @@ export default function FinancePage() {
         </div>
       </div>
 
-      {/* BARRA DE ABAS (HISTÓRICO EM PRIMEIRO LUGAR) + PESQUISA RÁPIDA */}
+      {/* BARRA DE ABAS + PESQUISA RÁPIDA */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
         <div className="inline-flex bg-dark-card p-1.5 rounded-2xl border border-dark-border w-fit">
           <button
@@ -551,7 +541,6 @@ export default function FinancePage() {
           </button>
         </div>
 
-        {/* Busca por nome do cliente, grupo ou cota */}
         <div className="relative w-full lg:w-80">
           <Search
             size={16}
@@ -578,11 +567,10 @@ export default function FinancePage() {
       </div>
 
       {/* ========================================================================
-          ABA 1 (PADRÃO): HISTÓRICO DE VENDAS COM FILTROS E SOMATÓRIAS
+          ABA 1: HISTÓRICO DE VENDAS COM FILTROS E SOMATÓRIAS
       ======================================================================== */}
       {abaAtiva === 'VENDAS' && (
         <div className="bg-dark-card border border-dark-border rounded-2xl p-6 shadow-lg animate-in fade-in duration-200">
-          {/* Cabeçalho e Barra de Filtros Avançados */}
           <div className="flex flex-col gap-4 mb-6 border-b border-white/5 pb-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
@@ -603,9 +591,7 @@ export default function FinancePage() {
               )}
             </div>
 
-            {/* Grade de Filtros (Mês, Data Início, Data Fim, Tipo e Grupo) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-              {/* Filtro 1: Mês da Venda */}
               <div className="bg-black/40 border border-white/10 rounded-xl px-3 py-2">
                 <label className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-gray-400 mb-1">
                   <Calendar size={12} className="text-red-400" /> Mês da Venda
@@ -626,7 +612,6 @@ export default function FinancePage() {
                 </select>
               </div>
 
-              {/* Filtro 2: Período - Data Inicial */}
               <div className="bg-black/40 border border-white/10 rounded-xl px-3 py-2">
                 <label className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-gray-400 mb-1">
                   <Calendar size={12} className="text-blue-400" /> Período (De)
@@ -639,7 +624,6 @@ export default function FinancePage() {
                 />
               </div>
 
-              {/* Filtro 3: Período - Data Final */}
               <div className="bg-black/40 border border-white/10 rounded-xl px-3 py-2">
                 <label className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-gray-400 mb-1">
                   <Calendar size={12} className="text-blue-400" /> Período (Até)
@@ -652,7 +636,6 @@ export default function FinancePage() {
                 />
               </div>
 
-              {/* Filtro 4: Tipo de Carta */}
               <div className="bg-black/40 border border-white/10 rounded-xl px-3 py-2">
                 <label className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-gray-400 mb-1">
                   <Tag size={12} className="text-emerald-400" /> Tipo de Carta
@@ -673,7 +656,6 @@ export default function FinancePage() {
                 </select>
               </div>
 
-              {/* Filtro 5: Grupo */}
               <div className="bg-black/40 border border-white/10 rounded-xl px-3 py-2">
                 <label className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-gray-400 mb-1">
                   <Layers size={12} className="text-amber-400" /> Grupo
@@ -695,7 +677,6 @@ export default function FinancePage() {
               </div>
             </div>
 
-            {/* BARRA DE SOMATÓRIAS DO RECORTE ATUAL */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
               <div className="bg-black/50 border border-white/5 rounded-xl px-4 py-2.5">
                 <span className="text-[11px] uppercase font-bold text-gray-400 block">
@@ -736,7 +717,6 @@ export default function FinancePage() {
             </div>
           </div>
 
-          {/* TABELA DE VENDAS FILTRADAS */}
           {carregando ? (
             <p className="text-orange-400 text-center py-10 animate-pulse">Carregando vendas...</p>
           ) : vendasFiltradas.length === 0 ? (
@@ -759,7 +739,7 @@ export default function FinancePage() {
               <table className="w-full text-left text-sm text-gray-300">
                 <thead className="bg-black/60 text-gray-400 uppercase text-xs">
                   <tr>
-                    <th className="px-4 py-3 rounded-tl-lg">Data</th>
+                    <th className="px-4 py-3 rounded-tl-lg">Data / Competência</th>
                     <th className="px-4 py-3">Cliente</th>
                     <th className="px-4 py-3">Tipo / Grupo / Cota</th>
                     <th className="px-4 py-3">Valor da Carta</th>
@@ -770,8 +750,13 @@ export default function FinancePage() {
                 <tbody className="divide-y divide-white/5">
                   {vendasFiltradas.map((venda) => (
                     <tr key={venda.id} className="hover:bg-white/5 transition-colors">
-                      <td className="px-4 py-3.5 text-xs text-gray-400 whitespace-nowrap">
-                        {formatarDataVenda(venda.dataVenda)}
+                      <td className="px-4 py-3.5 text-xs whitespace-nowrap">
+                        <span className="text-gray-300 font-bold block">
+                          {formatarDataVenda(venda.dataVenda)}
+                        </span>
+                        <span className="text-[10px] text-amber-400/90 font-semibold">
+                          {obterRotuloNotaVenda(venda)}
+                        </span>
                       </td>
                       <td
                         onClick={() => navigate(`/clientes/${venda.clienteId}`)}

@@ -14,7 +14,7 @@ const AdminModule = lazy(() => import('./modules/admin/AdminPage'));
 const LeadsModule = lazy(() => import('./modules/leads/LeadsPage'));
 const ConfiguracoesModule = lazy(() => import('./modules/configuracoes/ConfiguracoesPage'));
 
-const APP_VERSION = '2.0 - Follow-Up';
+const APP_VERSION = '2.1 - Fechamento';
 
 export default function App() {
   const { user, isLoading, initializeAuth } = useAuthStore();
