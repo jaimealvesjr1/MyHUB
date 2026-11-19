@@ -121,19 +121,18 @@ const DIAS_ALERTA_INATIVIDADE = 3;
 const ORIGENS_LEAD = ['Network', 'Rede Social', 'Indicação', 'Recompra', 'Outro'];
 
 const GATILHOS_FOLLOWUP = [
-    'Retorno agendado após proposta',
-    'Aguardando virada de mês / pagamento',
-    'Avaliando condições com família / sócio',
-    'Enviar simulação de lance / contemplação',
-    'Não atendeu / Reativar contato',
+    'Retorno agendado',
+    'Aguardando melhor momento',
+    'Avaliando condições',
+    'Enviar simulação',
+    'Reativar contato',
     'Outro gatilho'
 ];
 
 const ATALHOS_CONVERSA = [
-    'Enviei simulação no WhatsApp, aguardando retorno.',
-    'Conversamos por ligação; pediu para retomar após receber.',
+    'Enviei simulação, aguardando retorno.',
+    'Conversamos por ligação; pediu para retomar em outro momento.',
     'Não atendeu hoje, tentar novamente em outro horário.',
-    'Está comparando prazos e lances antes de fechar.'
 ];
 
 export default function LeadsPage() {
@@ -1247,7 +1246,7 @@ export default function LeadsPage() {
                             <X size={20} />
                         </button>
                         <h2 className="text-xl font-bold text-white mb-1 flex items-center gap-2">
-                            <MessageSquarePlus className="text-amber-400" /> Follow-up & Gatilho de Retorno
+                            <MessageSquarePlus className="text-amber-400" /> Follow-up
                         </h2>
                         <p className="text-xs text-gray-400 mb-5">
                             Registre a última conversa com <strong className="text-white">{leadSelecionado.nome}</strong> e agende o próximo gatilho.
@@ -1334,7 +1333,7 @@ export default function LeadsPage() {
                                 type="submit"
                                 className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-3 rounded-xl transition-colors"
                             >
-                                Salvar Follow-up & Ativar Gatilho
+                                Salvar Atualização
                             </button>
                         </form>
 

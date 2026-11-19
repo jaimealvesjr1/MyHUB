@@ -185,7 +185,7 @@ export default function ClientesPage() {
       </div>
 
       {/* CARDS DE RESUMO DA CARTEIRA (KPIs) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 mb-8">
         <div
           onClick={() => setFiltroSegmento('TODOS')}
           className={`cursor-pointer bg-dark-card border p-5 rounded-2xl flex items-center justify-between transition-all ${
@@ -208,21 +208,6 @@ export default function ClientesPage() {
           </div>
           <div className="w-12 h-12 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500">
             <Users size={22} />
-          </div>
-        </div>
-
-        <div className="bg-dark-card border border-dark-border p-5 rounded-2xl flex items-center justify-between">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-gray-400">
-              Volume da Carteira
-            </p>
-            <p className="text-2xl font-black text-blue-400 mt-1">
-              {formatarMoeda(indicadoresCarteira.volumeCarteira)}
-            </p>
-            <p className="text-xs text-gray-500 mt-1">Soma total em cartas vendidas</p>
-          </div>
-          <div className="w-12 h-12 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
-            <Wallet size={22} />
           </div>
         </div>
 
