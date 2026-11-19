@@ -4,9 +4,9 @@ import { useAuthStore } from '../../store/useAuthStore';
 import {
   Target, Calendar, BarChart3, Clock, Edit2, Check,
   Gift, Briefcase, Coins, ArrowUpRight, Wallet,
-  BellRing, CheckCircle2, X
+  BellRing, CheckCircle2, X, SlidersHorizontal, TrendingUp
 } from 'lucide-react';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
 import { toast } from 'react-hot-toast';
 import { db } from '../../config/firebase';
 import {
@@ -16,6 +16,11 @@ import {
   isParcelaConfirmada
 } from '../../services/vendasService';
 import { buscarClientes } from '../../services/clienteService';
+import {
+  buscarOuInicializarPlanos,
+  calcularCronogramaComissao,
+  PlanoComissao
+} from '../../utils/comissaoEngine';
 import { Cliente, ParcelaComissao, VendaConsorcio } from '../../types/models';
 
 interface ClienteComNiver extends Cliente {
@@ -57,6 +62,9 @@ export default function DashboardPage() {
 
   const [carregando, setCarregando] = useState(true);
   const [periodoAtivo, setPeriodoAtivo] = useState<Periodo>('mensal');
+
+  // Plano de comissão padrão para projeção do Dinheiro na Mesa
+  const [planoPadrao, setPlanoPadrao] = useState<PlanoComissao | null>(null);
 
   // Fluxo de caixa e confirmações
   const [recebimentoProxConfirmado, setRecebimentoProxConfirmado] = useState(0);
@@ -163,7 +171,28 @@ export default function DashboardPage() {
     hoje.setHours(0, 0, 0, 0);
     const hojeISO = new Date().toISOString().split('T')[0];
 
-    // 1. Leads (Follow-ups e Dinheiro na Mesa)
+    // 0. Carrega o Plano de Comissão Padrão configurado pelo usuário
+    if (user?.uid) {
+      try {
+        const planosDisponiveis = await buscarOuInicializarPlanos(user.uid);
+        const planoPadraoLocal = localStorage.getItem(`plano_padrao_crm_${user.uid}`) || '';
+
+        const encontrado =
+          planosDisponiveis.find((p: any) => p.isPadrao) ||
+          planosDisponiveis.find((p) => p.id === planoPadraoLocal) ||
+          planosDisponiveis[0] ||
+          null;
+
+        if (encontrado?.id) {
+          localStorage.setItem(`plano_padrao_crm_${user.uid}`, encontrado.id);
+        }
+        setPlanoPadrao(encontrado);
+      } catch (err) {
+        console.error('Erro ao buscar plano padrão:', err);
+      }
+    }
+
+    // 1. Leads (Follow-ups e Dinheiro na Mesa com suporte a múltiplas propostas)
     if (user?.uid) {
       const qLeads = query(collection(db, 'leads'), where('responsavelId', '==', user.uid));
       const snapLeads = await getDocs(qLeads);
@@ -176,8 +205,22 @@ export default function DashboardPage() {
 
       snapLeads.docs.forEach((docSnap) => {
         const lead = docSnap.data();
+
+        // Calcula o valor ativo considerando múltiplas propostas ou campo legado
+        const propostasAtivas = Array.isArray(lead.propostas)
+          ? lead.propostas.filter((p: any) => p.statusProposta === 'ATIVA')
+          : [];
+        const somaPropostasAtivas = propostasAtivas.reduce(
+          (acc: number, p: any) => acc + moedaTextoParaNumero(p.valorCredito),
+          0
+        );
+
         if (lead.status === 'proposta') {
-          emProposta += moedaTextoParaNumero(lead.valorNegociado);
+          const valorLead =
+            propostasAtivas.length > 0
+              ? somaPropostasAtivas
+              : moedaTextoParaNumero(lead.valorNegociado);
+          emProposta += valorLead;
           qtdProposta += 1;
         } else if (lead.status === 'fechado') {
           emFechamento += moedaTextoParaNumero(lead.valorFechado || lead.valorNegociado);
@@ -378,6 +421,20 @@ export default function DashboardPage() {
     }
   };
 
+  // ============================================================================
+  // CÁLCULO ASSERTIVO DE INCREMENTO MENSAL (GARANTIDO NO MÊS VS DINHEIRO NA MESA)
+  // ============================================================================
+  const hojeISORef = new Date().toISOString().split('T')[0];
+  const simulacaoDinheiroNaMesa =
+    planoPadrao && dinheiroNaMesa.total > 0
+      ? calcularCronogramaComissao(dinheiroNaMesa.total, hojeISORef, planoPadrao)
+      : null;
+
+  const incrementoMensalGarantidoMes = acumulado.mensal.salario;
+  const comissaoTotalGarantidaMes = acumulado.mensal.comissaoGeral;
+
+  const comissaoTotalNaMesa = simulacaoDinheiroNaMesa?.valorComissaoTotal || 0;
+  const incrementoMensalNaMesa = simulacaoDinheiroNaMesa?.parcelas?.[0]?.valorReceber || 0;
   // Componente limpo de Meta + Previsão + Edição Inline
   const RenderCardMeta = ({ titulo, categoria }: { titulo: string; categoria: 'volume' | 'salario' }) => {
     const atual = acumulado[periodoAtivo][categoria];
@@ -415,7 +472,6 @@ export default function DashboardPage() {
             </span>
           </div>
 
-          {/* Valor Realizado vs Meta (com input inline ao clicar em Editar Metas) */}
           <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
             <p className="text-xl font-black text-white">{formatarValor(atual)}</p>
             {isEditingMetas ? (
@@ -435,7 +491,6 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {/* Barra de Progresso */}
           <div className="w-full bg-gray-800 rounded-full h-2 mb-4 overflow-hidden">
             <div
               className={`h-2 rounded-full transition-all duration-700 ${
@@ -445,7 +500,6 @@ export default function DashboardPage() {
             />
           </div>
 
-          {/* Previsão & Falta */}
           <div className="grid grid-cols-2 gap-3 bg-black/30 p-3 rounded-xl border border-white/5">
             <div>
               <p className="text-[10px] text-gray-500 uppercase font-bold">Previsão Fechamento</p>
@@ -462,7 +516,6 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Esforço Prático (apenas se ainda faltar para a meta e já houver vendas) */}
         {faltaParaMeta > 0 && ticketMedio > 0 && (
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-400 pt-2 border-t border-white/5">
             <span>
@@ -489,7 +542,7 @@ export default function DashboardPage() {
     dadosPeriodo.vendas > 0 ? dadosPeriodo.volume / dadosPeriodo.vendas : 0;
 
   return (
-    <div className="p-4 md:p-8 max-w-7xl mx-auto animate-in fade-in duration-300">
+    <div className="w-full p-4 md:p-8 animate-in fade-in duration-300">
       {/* 1. CABEÇALHO + ALERTA DE FOLLOW-UP */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
@@ -539,9 +592,8 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* 2. 4 KPIs ESSENCIAIS (SEM REDUNDÂNCIA) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        {/* Card 1: Volume + Cotas + Ticket Médio */}
+      {/* 2. 4 KPIs ESSENCIAIS */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div className="bg-linear-to-br from-blue-600/15 to-dark-card border border-blue-500/30 p-5 rounded-2xl flex flex-col justify-between">
           <p className="text-xs text-blue-400 font-bold flex items-center gap-1.5">
             <Wallet size={15} /> Volume Vendido ({periodoAtivo})
@@ -555,7 +607,6 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        {/* Card 2: Salário Gerado + Comissão Total */}
         <div className="bg-dark-card border border-dark-border p-5 rounded-2xl flex flex-col justify-between">
           <p className="text-xs text-gray-400 font-bold flex items-center gap-1.5">
             <Briefcase size={15} className="text-emerald-400" /> Salário Gerado ({periodoAtivo})
@@ -568,7 +619,6 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        {/* Card 3: Próximo Fechamento (Confirmado vs Aguardando Cliente) */}
         <div className="bg-emerald-600/10 border border-emerald-500/30 p-5 rounded-2xl flex flex-col justify-between">
           <p className="text-xs text-emerald-400 font-bold flex items-center gap-1.5">
             <Clock size={15} /> Próximo Fechamento
@@ -581,7 +631,6 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        {/* Card 4: Dinheiro na Mesa (Funil de Leads) */}
         <div
           onClick={() => navigate('/leads')}
           className="cursor-pointer bg-linear-to-br from-amber-500/15 to-dark-card border border-amber-500/30 hover:border-amber-400/60 p-5 rounded-2xl flex flex-col justify-between transition-all"
@@ -598,6 +647,189 @@ export default function DashboardPage() {
           <p className="text-[11px] text-gray-400">
             {dinheiroNaMesa.qtdProposta} propostas • {dinheiroNaMesa.qtdFechamento} em fechamento
           </p>
+        </div>
+      </div>
+
+      {/* 4. METAS & RITMO (COM EDIÇÃO INLINE) + PRÓXIMOS ANIVERSÁRIOS */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-8">
+        <div className="xl:col-span-2 bg-dark-card border border-dark-border rounded-3xl p-6 shadow-lg">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-5">
+            <h2 className="text-base font-bold text-white flex items-center gap-2">
+              <BarChart3 className="text-red-600" size={18} />
+              Metas & Previsão ({periodoAtivo})
+            </h2>
+
+            {isEditingMetas ? (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setIsEditingMetas(false)}
+                  className="text-xs font-bold text-gray-400 hover:text-white bg-white/5 px-3 py-1.5 rounded-full inline-flex items-center gap-1"
+                >
+                  <X size={13} /> Cancelar
+                </button>
+                <button
+                  onClick={salvarMetas}
+                  className="text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 px-3.5 py-1.5 rounded-full inline-flex items-center gap-1"
+                >
+                  <Check size={13} /> Salvar Metas
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setIsEditingMetas(true)}
+                className="text-xs font-bold text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 px-3.5 py-1.5 rounded-full inline-flex items-center gap-1.5 transition-colors"
+              >
+                <Target size={13} className="text-red-500" />
+                <Edit2 size={12} /> Editar Metas
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <RenderCardMeta titulo="Volume de Crédito" categoria="volume" />
+            <RenderCardMeta titulo="Salário (Comissão Diluída)" categoria="salario" />
+          </div>
+        </div>
+
+        <div className="xl:col-span-1 bg-dark-card border border-dark-border rounded-3xl p-6 shadow-lg flex flex-col justify-between">
+          <div>
+            <h2 className="text-base font-bold text-white flex items-center gap-2 mb-5">
+              <Gift className="text-red-500" size={18} />
+              Próximos Aniversários
+            </h2>
+
+            {carregando ? (
+              <p className="text-gray-500 text-sm">Buscando...</p>
+            ) : proximosAniversariantes.length > 0 ? (
+              <div className="space-y-2.5">
+                {proximosAniversariantes.map((cli) => (
+                  <div
+                    key={cli.id}
+                    onClick={() => cli.id && navigate(`/clientes/${cli.id}`)}
+                    className="flex justify-between items-center bg-black/35 hover:bg-black/60 cursor-pointer px-3.5 py-2.5 rounded-xl border border-white/5 transition-colors"
+                  >
+                    <div className="min-w-0 pr-2">
+                      <p className="text-xs font-bold text-white truncate">{cli.nomeCompleto}</p>
+                      <p className="text-[10px] text-gray-400">
+                        {cli.dataNascimento?.split('-').reverse().join('/')}
+                      </p>
+                    </div>
+                    <span
+                      className={`text-[11px] font-bold px-2.5 py-1 rounded-lg shrink-0 ${
+                        cli.diasFaltando === 0
+                          ? 'bg-red-500/20 text-red-400'
+                          : 'bg-white/5 text-gray-300'
+                      }`}
+                    >
+                      {cli.diasFaltando === 0 ? 'Hoje! 🎂' : `${cli.diasFaltando}d`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <Gift className="text-gray-600 mx-auto mb-2 opacity-50" size={28} />
+                <p className="text-gray-500 text-xs">Nenhuma data de nascimento cadastrada.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* 2.5 PREVISÃO ASSERTIVA DE INCREMENTO MENSAL (GARANTIDO NO MÊS VS APENAS DINHEIRO NA MESA) */}
+      <div className="bg-dark-card border border-dark-border rounded-3xl p-6 shadow-lg mb-8">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+          <div>
+            <h2 className="text-base font-bold text-white flex items-center gap-2">
+              <TrendingUp className="text-emerald-400" size={18} />
+              Previsão Assertiva de Comissão Recorrente (Mês Atual)
+            </h2>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Compare o que você já garantiu por mês no volume fechado com o potencial mensal das propostas na mesa.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => navigate('/configuracoes')}
+            className="text-xs font-bold text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 px-3.5 py-2 rounded-xl inline-flex items-center gap-2 transition-colors"
+          >
+            <SlidersHorizontal size={14} className="text-amber-400" />
+            <span>
+              Plano Padrão: <strong className="text-white">{planoPadrao?.nome || 'Carregando...'}</strong>
+            </span>
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Card A: Garantido com o volume deste mês */}
+          <div className="bg-emerald-500/10 border border-emerald-500/25 rounded-2xl p-5 flex flex-col justify-between">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <span className="text-[11px] font-black uppercase tracking-wider text-emerald-400 bg-emerald-500/15 px-2.5 py-1 rounded-full">
+                  1. Garantido neste Mês
+                </span>
+                <p className="text-xs text-gray-300 mt-2">
+                  Incremento mensal garantido pelo volume já fechado neste mês ({formatarValor(acumulado.mensal.volume)}):
+                </p>
+              </div>
+            </div>
+
+            <div className="my-4">
+              <p className="text-3xl font-black text-emerald-400">
+                {carregando ? '-' : `+${formatarValor(incrementoMensalGarantidoMes)}`}
+                <span className="text-sm font-bold text-emerald-300/80"> /mês</span>
+              </p>
+              <p className="text-xs text-gray-400 mt-1">
+                Comissão total garantida nas vendas do mês:{' '}
+                <strong className="text-white">{formatarValor(comissaoTotalGarantidaMes)}</strong>
+              </p>
+            </div>
+
+            <div className="pt-3 border-t border-emerald-500/15 flex items-center justify-between text-xs text-gray-300">
+              <span>Vendas contabilizadas no mês:</span>
+              <strong className="text-white">
+                {acumulado.mensal.vendas} {acumulado.mensal.vendas === 1 ? 'cota' : 'cotas'}
+              </strong>
+            </div>
+          </div>
+
+          {/* Card B: Apenas Dinheiro na Mesa */}
+          <div className="bg-amber-500/10 border border-amber-500/25 rounded-2xl p-5 flex flex-col justify-between">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <span className="text-[11px] font-black uppercase tracking-wider text-amber-400 bg-amber-500/15 px-2.5 py-1 rounded-full">
+                  2. Dinheiro na Mesa (Em Negociação)
+                </span>
+                <p className="text-xs text-gray-300 mt-2">
+                  Potencial mensal estimado apenas com os {formatarValor(dinheiroNaMesa.total)} ativos no funil (pelo plano padrão):
+                </p>
+              </div>
+            </div>
+
+            <div className="my-4">
+              <p className="text-3xl font-black text-amber-400">
+                {carregando ? '-' : `+${formatarValor(incrementoMensalNaMesa)}`}
+                <span className="text-sm font-bold text-amber-300/80"> /mês</span>
+              </p>
+              <p className="text-xs text-gray-400 mt-1">
+                Comissão total estimada nas propostas na mesa:{' '}
+                <strong className="text-white">{formatarValor(comissaoTotalNaMesa)}</strong>
+              </p>
+            </div>
+
+            <div className="pt-3 border-t border-amber-500/15 flex items-center justify-between text-xs text-gray-300">
+              <span>Oportunidades na mesa:</span>
+              <button
+                type="button"
+                onClick={() => navigate('/leads')}
+                className="font-bold text-amber-400 hover:underline inline-flex items-center gap-1"
+              >
+                {dinheiroNaMesa.qtdProposta + dinheiroNaMesa.qtdFechamento} tratativas ativas{' '}
+                <ArrowUpRight size={13} />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -705,94 +937,6 @@ export default function DashboardPage() {
             </div>
           </div>
         )}
-      </div>
-
-      {/* 4. METAS & RITMO (COM EDIÇÃO INLINE) + PRÓXIMOS ANIVERSÁRIOS */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        {/* Metas (2/3 da largura) */}
-        <div className="xl:col-span-2 bg-dark-card border border-dark-border rounded-3xl p-6 shadow-lg">
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-5">
-            <h2 className="text-base font-bold text-white flex items-center gap-2">
-              <BarChart3 className="text-red-600" size={18} />
-              Metas & Previsão ({periodoAtivo})
-            </h2>
-
-            {isEditingMetas ? (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setIsEditingMetas(false)}
-                  className="text-xs font-bold text-gray-400 hover:text-white bg-white/5 px-3 py-1.5 rounded-full inline-flex items-center gap-1"
-                >
-                  <X size={13} /> Cancelar
-                </button>
-                <button
-                  onClick={salvarMetas}
-                  className="text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 px-3.5 py-1.5 rounded-full inline-flex items-center gap-1"
-                >
-                  <Check size={13} /> Salvar Metas
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setIsEditingMetas(true)}
-                className="text-xs font-bold text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 px-3.5 py-1.5 rounded-full inline-flex items-center gap-1.5 transition-colors"
-              >
-                <Target size={13} className="text-red-500" />
-                <Edit2 size={12} /> Editar Metas
-              </button>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <RenderCardMeta titulo="Volume de Crédito" categoria="volume" />
-            <RenderCardMeta titulo="Salário (Comissão Diluída)" categoria="salario" />
-          </div>
-        </div>
-
-        {/* Próximos Aniversários (1/3 da largura) */}
-        <div className="xl:col-span-1 bg-dark-card border border-dark-border rounded-3xl p-6 shadow-lg flex flex-col justify-between">
-          <div>
-            <h2 className="text-base font-bold text-white flex items-center gap-2 mb-5">
-              <Gift className="text-red-500" size={18} />
-              Próximos Aniversários
-            </h2>
-
-            {carregando ? (
-              <p className="text-gray-500 text-sm">Buscando...</p>
-            ) : proximosAniversariantes.length > 0 ? (
-              <div className="space-y-2.5">
-                {proximosAniversariantes.map((cli) => (
-                  <div
-                    key={cli.id}
-                    onClick={() => cli.id && navigate(`/clientes/${cli.id}`)}
-                    className="flex justify-between items-center bg-black/35 hover:bg-black/60 cursor-pointer px-3.5 py-2.5 rounded-xl border border-white/5 transition-colors"
-                  >
-                    <div className="min-w-0 pr-2">
-                      <p className="text-xs font-bold text-white truncate">{cli.nomeCompleto}</p>
-                      <p className="text-[10px] text-gray-400">
-                        {cli.dataNascimento?.split('-').reverse().join('/')}
-                      </p>
-                    </div>
-                    <span
-                      className={`text-[11px] font-bold px-2.5 py-1 rounded-lg shrink-0 ${
-                        cli.diasFaltando === 0
-                          ? 'bg-red-500/20 text-red-400'
-                          : 'bg-white/5 text-gray-300'
-                      }`}
-                    >
-                      {cli.diasFaltando === 0 ? 'Hoje! 🎂' : `${cli.diasFaltando}d`}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-8">
-                <Gift className="text-gray-600 mx-auto mb-2 opacity-50" size={28} />
-                <p className="text-gray-500 text-xs">Nenhuma data de nascimento cadastrada.</p>
-              </div>
-            )}
-          </div>
-        </div>
       </div>
     </div>
   );

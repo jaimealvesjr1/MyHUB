@@ -163,7 +163,7 @@ export default function ClientesPage() {
   // 6. RENDERIZAÇÃO DA INTERFACE
   // ============================================================================
   return (
-    <div className="p-4 md:p-8 animate-in fade-in duration-300 max-w-[1600px] mx-auto">
+    <div className="p-4 md:p-8 animate-in fade-in duration-300 w-full">
       {/* CABEÇALHO PRINCIPAL */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
         <div>

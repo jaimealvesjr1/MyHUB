@@ -5,7 +5,8 @@ import {
     AlertCircle, FileText, Target, RefreshCw,
     Trash2, Edit2, X, Tag, DollarSign, UserCheck,
     MessageSquarePlus, BellRing, History, Search,
-    Users, TrendingUp, Filter, Receipt
+    Users, TrendingUp, Filter, Receipt,
+    Layers, ExternalLink, RotateCcw
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAuthStore } from '../../store/useAuthStore';
@@ -20,6 +21,28 @@ import {
     registrarVendaUnificada
 } from '../../utils/comissaoEngine';
 
+// Ícone SVG leve do Instagram (substitui o ícone removido das versões recentes do lucide-react)
+function InstagramIcon({ size = 14, className = '' }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+        >
+            <rect width="20" height="20" x="2" y="2" rx="5" ry="5" />
+            <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
+            <line x1="17.5" x2="17.51" y1="6.5" y2="6.5" />
+        </svg>
+    );
+}
+
 // ============================================================================
 // 1. FUNÇÕES AUXILIARES DE FORMATAÇÃO E DATAS
 // ============================================================================
@@ -27,6 +50,11 @@ function formatarMoeda(valor) {
     const apenasDigitos = String(valor).replace(/\D/g, '');
     if (!apenasDigitos) return '';
     const numero = Number(apenasDigitos) / 100;
+    return numero.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function numeroParaMoeda(numero) {
+    if (!Number.isFinite(numero) || numero <= 0) return '';
     return numero.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
@@ -41,6 +69,22 @@ function formatarTelefone(valor) {
     if (nums.length <= 2) return nums;
     if (nums.length <= 7) return `(${nums.slice(0, 2)}) ${nums.slice(2)}`;
     return `(${nums.slice(0, 2)}) ${nums.slice(2, 7)}-${nums.slice(7)}`;
+}
+
+function formatarInstagram(valor) {
+    const limpo = String(valor || '').trim();
+    if (!limpo) return '';
+    const semUrl = limpo
+        .replace(/^https?:\/\/(www\.)?instagram\.com\//i, '')
+        .replace(/\/.*$/, '')
+        .replace(/^@+/, '')
+        .trim();
+    return semUrl ? `@${semUrl}` : '';
+}
+
+function gerarLinkInstagram(instagram) {
+    const handle = formatarInstagram(instagram).replace(/^@/, '');
+    return handle ? `https://instagram.com/${handle}` : '';
 }
 
 function formatarCPF(valor) {
@@ -76,14 +120,12 @@ function calcularDiasDiferenca(dataISO) {
     return Math.floor((hoje.getTime() - alvo.getTime()) / (1000 * 60 * 60 * 24));
 }
 
-// Retorna a competência sugerida ('ATUAL' até dia 15, 'PROXIMO' após dia 15)
 function sugerirCompetenciaNota(dataISO) {
     if (!dataISO || !dataISO.includes('-')) return 'ATUAL';
     const dia = Number(dataISO.split('-')[2]);
     return dia <= 15 ? 'ATUAL' : 'PROXIMO';
 }
 
-// Calcula os rótulos legíveis dos meses da nota e do 1º recebimento sem risco de fuso horário
 function obterDetalhesCompetenciaNota(dataISO) {
     if (!dataISO || !dataISO.includes('-')) {
         return {
@@ -96,7 +138,7 @@ function obterDetalhesCompetenciaNota(dataISO) {
 
     const [anoStr, mesStr] = dataISO.split('-');
     const ano = Number(anoStr);
-    const mesIndex = Number(mesStr) - 1; // 0 = Janeiro ... 11 = Dezembro
+    const mesIndex = Number(mesStr) - 1;
 
     const formatarMesAno = (offsetMeses) => {
         const dataRef = new Date(ano, mesIndex + offsetMeses, 1);
@@ -110,6 +152,49 @@ function obterDetalhesCompetenciaNota(dataISO) {
         mesRecebimentoAtual: formatarMesAno(1),
         mesNotaProximo: formatarMesAno(1),
         mesRecebimentoProximo: formatarMesAno(2)
+    };
+}
+
+function obterListaPropostasLead(lead) {
+    if (Array.isArray(lead?.propostas) && lead.propostas.length > 0) {
+        return lead.propostas;
+    }
+    if (lead?.valorNegociado && moedaParaNumero(lead.valorNegociado) > 0) {
+        return [
+            {
+                id: 'legado-1',
+                titulo: 'Proposta Principal',
+                tipoCarta: 'Imobiliária',
+                valorCredito: lead.valorNegociado,
+                valorParcela: '',
+                prazoMeses: '',
+                statusProposta: 'ATIVA',
+                versao: 1,
+                motivoAtualizacao: '',
+                dataCriacao: lead.dataChegada || new Date().toISOString().split('T')[0],
+                dataAtualizacao: lead.dataChegada || new Date().toISOString().split('T')[0],
+                historicoVersoes: []
+            }
+        ];
+    }
+    return [];
+}
+
+function calcularResumoPropostasLead(listaPropostas) {
+    const ativas = listaPropostas.filter((p) => p.statusProposta === 'ATIVA');
+    const aprovada = listaPropostas.find((p) => p.statusProposta === 'APROVADA');
+    const baseSoma = ativas.length > 0 ? ativas : aprovada ? [aprovada] : [];
+    const somaCredito = baseSoma.reduce((acc, p) => acc + moedaParaNumero(p.valorCredito), 0);
+    const somaParcela = baseSoma.reduce((acc, p) => acc + moedaParaNumero(p.valorParcela), 0);
+
+    return {
+        qtdTotal: listaPropostas.length,
+        qtdAtivas: ativas.length,
+        somaCredito,
+        somaCreditoFormatado: numeroParaMoeda(somaCredito),
+        somaParcela,
+        somaParcelaFormatado: numeroParaMoeda(somaParcela),
+        aprovada
     };
 }
 
@@ -156,9 +241,19 @@ export default function LeadsPage() {
     const [novoLead, setNovoLead] = useState({
         nome: '',
         telefone: '',
+        instagram: '',
         dataChegada: dataHojeISO,
-        origem: 'Network',
+        origem: 'Rede Social',
         clienteExistenteId: ''
+    });
+
+    // Formulário de Edição Completa do Lead
+    const [formEditarLead, setFormEditarLead] = useState({
+        nome: '',
+        telefone: '',
+        instagram: '',
+        dataChegada: dataHojeISO,
+        origem: 'Network'
     });
 
     const [novaAnotacao, setNovaAnotacao] = useState('');
@@ -168,7 +263,34 @@ export default function LeadsPage() {
     const [leadSelecionado, setLeadSelecionado] = useState(null);
 
     const [dadosContato, setDadosContato] = useState({ data: dataHojeISO, hora: '' });
-    const [valorNegociadoInput, setValorNegociadoInput] = useState('');
+
+    // Modal inicial ao mover de "Em Contato" -> "Proposta"
+    const [primeiraPropostaForm, setPrimeiraPropostaForm] = useState({
+        titulo: 'Proposta Principal',
+        tipoCarta: 'Imobiliária',
+        valorCredito: '',
+        valorParcela: '',
+        prazoMeses: ''
+    });
+
+    // Modal de Gestão de Múltiplas Propostas & Revisões
+    const [novaPropostaTratativa, setNovaPropostaTratativa] = useState({
+        titulo: '',
+        tipoCarta: 'Imobiliária',
+        valorCredito: '',
+        valorParcela: '',
+        prazoMeses: ''
+    });
+    const [propostaEmRevisaoId, setPropostaEmRevisaoId] = useState(null);
+    const [formRevisaoProposta, setFormRevisaoProposta] = useState({
+        titulo: '',
+        tipoCarta: 'Imobiliária',
+        valorCredito: '',
+        valorParcela: '',
+        prazoMeses: '',
+        motivoAtualizacao: ''
+    });
+    const [historicoPropostaAbertoId, setHistoricoPropostaAbertoId] = useState(null);
 
     // Modal de Follow-up & Gatilhos
     const [formFollowUp, setFormFollowUp] = useState({
@@ -180,8 +302,10 @@ export default function LeadsPage() {
     // Modal de Fechamento + Dados Complementares do Cliente
     const [dadosFechamento, setDadosFechamento] = useState({
         valorFechado: '',
+        propostaAprovadaId: '',
         nomeCompleto: '',
         telefone: '',
+        instagram: '',
         cpf: '',
         dataNascimento: '',
         clienteExistenteId: ''
@@ -195,7 +319,7 @@ export default function LeadsPage() {
         hora: ''
     });
 
-    // Modal de Conversão Final (Registro da Venda & Comissionamento)
+    // Modal de Conversão Final
     const [formConversao, setFormConversao] = useState({
         nomeCompleto: '',
         telefone: '',
@@ -205,7 +329,7 @@ export default function LeadsPage() {
         tipoCarta: 'Imobiliária',
         valorTotalCarta: '',
         dataVenda: dataHojeISO,
-        competenciaNota: sugerirCompetenciaNota(dataHojeISO), // 'ATUAL' | 'PROXIMO'
+        competenciaNota: sugerirCompetenciaNota(dataHojeISO),
         grupo: '',
         cota: '',
         planoComissaoId: ''
@@ -261,14 +385,15 @@ export default function LeadsPage() {
     }, [user?.uid]);
 
     // ========================================================================
-    // 4. CADASTRO E EDIÇÃO DE LEADS (COM SUPORTE A RECOMPRA)
+    // 4. CADASTRO E EDIÇÃO COMPLETA DE LEADS (COM INSTAGRAM E RECOMPRA)
     // ========================================================================
     const abrirModalNovoLead = () => {
         setNovoLead({
             nome: '',
             telefone: '',
+            instagram: '',
             dataChegada: dataHojeISO,
-            origem: 'Network',
+            origem: 'Rede Social',
             clienteExistenteId: ''
         });
         setModalAtivo('novoLead');
@@ -293,8 +418,16 @@ export default function LeadsPage() {
 
     const handleAddLead = async (e) => {
         e.preventDefault();
-        if (!novoLead.nome.trim() || !novoLead.telefone.trim() || !novoLead.dataChegada || !novoLead.origem) {
-            return toast.error('Preencha Nome, Telefone, Data de Chegada e Origem.');
+        const temTelefone = novoLead.telefone.trim().length > 0;
+        const instaFormatado = formatarInstagram(novoLead.instagram);
+        const temInstagram = instaFormatado.length > 1;
+
+        if (!novoLead.nome.trim() || !novoLead.dataChegada || !novoLead.origem) {
+            return toast.error('Preencha Nome, Data de Chegada e Origem.');
+        }
+
+        if (!temTelefone && !temInstagram) {
+            return toast.error('Informe pelo menos o Telefone/WhatsApp ou o Instagram do lead.');
         }
 
         const cliVinculado = novoLead.clienteExistenteId
@@ -305,7 +438,8 @@ export default function LeadsPage() {
             await addDoc(collection(db, 'leads'), {
                 nome: novoLead.nome.trim(),
                 nomeCompleto: cliVinculado ? cliVinculado.nomeCompleto : novoLead.nome.trim(),
-                telefone: novoLead.telefone,
+                telefone: novoLead.telefone.trim(),
+                instagram: instaFormatado,
                 cpf: cliVinculado?.cpf || '',
                 dataNascimento: cliVinculado?.dataNascimento || '',
                 clienteExistenteId: cliVinculado?.id || '',
@@ -316,6 +450,7 @@ export default function LeadsPage() {
                 horaReuniao: '',
                 valorNegociado: '',
                 valorFechado: '',
+                propostas: [],
                 ultimoFollowUpTexto: '',
                 ultimoFollowUpData: '',
                 gatilhoFollowUp: '',
@@ -333,14 +468,46 @@ export default function LeadsPage() {
         }
     };
 
-    const editarLead = async (lead) => {
-        const novoNome = window.prompt('Editar nome do Lead:', lead.nome);
-        if (novoNome && novoNome.trim() !== '') {
-            await updateDoc(doc(db, 'leads', lead.id), {
-                nome: novoNome.trim(),
-                nomeCompleto: novoNome.trim()
+    const abrirModalEditarLead = (lead) => {
+        setLeadSelecionado(lead);
+        setFormEditarLead({
+            nome: lead.nome || '',
+            telefone: lead.telefone || '',
+            instagram: lead.instagram || '',
+            dataChegada: lead.dataChegada || dataHojeISO,
+            origem: lead.origem || 'Network'
+        });
+        setModalAtivo('editarLead');
+    };
+
+    const salvarEdicaoLead = async (e) => {
+        e.preventDefault();
+        const temTelefone = formEditarLead.telefone.trim().length > 0;
+        const instaFormatado = formatarInstagram(formEditarLead.instagram);
+        const temInstagram = instaFormatado.length > 1;
+
+        if (!formEditarLead.nome.trim()) {
+            return toast.error('O nome do lead é obrigatório.');
+        }
+        if (!temTelefone && !temInstagram) {
+            return toast.error('Informe pelo menos o Telefone/WhatsApp ou o Instagram.');
+        }
+
+        try {
+            await updateDoc(doc(db, 'leads', leadSelecionado.id), {
+                nome: formEditarLead.nome.trim(),
+                nomeCompleto: formEditarLead.nome.trim(),
+                telefone: formEditarLead.telefone.trim(),
+                instagram: instaFormatado,
+                dataChegada: formEditarLead.dataChegada,
+                origem: formEditarLead.origem
             });
-            toast.success('Nome atualizado!');
+            setModalAtivo(null);
+            setLeadSelecionado(null);
+            toast.success('Dados do lead atualizados!');
+        } catch (error) {
+            console.error('Erro ao editar lead:', error);
+            toast.error('Erro ao salvar alterações do lead.');
         }
     };
 
@@ -352,7 +519,197 @@ export default function LeadsPage() {
     };
 
     // ========================================================================
-    // 5. FOLLOW-UP & GATILHOS DE RETOMADA
+    // 5. CENTRAL DE PROPOSTAS & CONTROLE DE VERSÕES / ATUALIZAÇÕES
+    // ========================================================================
+    const abrirModalPropostasLead = (lead) => {
+        setLeadSelecionado(lead);
+        const existentes = obterListaPropostasLead(lead);
+        setNovaPropostaTratativa({
+            titulo: `Opção ${existentes.length + 1}`,
+            tipoCarta: 'Imobiliária',
+            valorCredito: '',
+            valorParcela: '',
+            prazoMeses: ''
+        });
+        setPropostaEmRevisaoId(null);
+        setHistoricoPropostaAbertoId(null);
+        setModalAtivo('propostasLead');
+    };
+
+    const persistirPropostasNoLead = async (leadAlvo, novaListaPropostas, logFollowUpTexto) => {
+        const resumo = calcularResumoPropostasLead(novaListaPropostas);
+        const historicoAtual = Array.isArray(leadAlvo.historicoFollowUp)
+            ? leadAlvo.historicoFollowUp
+            : [];
+
+        const novoHistorico = logFollowUpTexto
+            ? [
+                  {
+                      data: dataHojeISO,
+                      hora: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+                      texto: logFollowUpTexto,
+                      gatilho: 'Atualização de proposta',
+                      proximoRetorno: leadAlvo.proximoFollowUpData || adicionarDiasISO(2)
+                  },
+                  ...historicoAtual
+              ]
+            : historicoAtual;
+
+        const payloadUpdate = {
+            propostas: novaListaPropostas,
+            valorNegociado: resumo.somaCreditoFormatado,
+            ...(logFollowUpTexto
+                ? {
+                      ultimoFollowUpTexto: logFollowUpTexto,
+                      ultimoFollowUpData: dataHojeISO,
+                      historicoFollowUp: novoHistorico
+                  }
+                : {})
+        };
+
+        await updateDoc(doc(db, 'leads', leadAlvo.id), payloadUpdate);
+        setLeadSelecionado((prev) =>
+            prev && prev.id === leadAlvo.id ? { ...prev, ...payloadUpdate } : prev
+        );
+    };
+
+    const handleAdicionarNovaPropostaTratativa = async (e) => {
+        e.preventDefault();
+        if (moedaParaNumero(novaPropostaTratativa.valorCredito) <= 0) {
+            return toast.error('Informe o valor do crédito da proposta.');
+        }
+
+        const listaAtual = obterListaPropostasLead(leadSelecionado);
+        const novaProp = {
+            id: `prop-${Date.now()}`,
+            titulo: novaPropostaTratativa.titulo.trim() || `Opção ${listaAtual.length + 1}`,
+            tipoCarta: novaPropostaTratativa.tipoCarta,
+            valorCredito: novaPropostaTratativa.valorCredito,
+            valorParcela: novaPropostaTratativa.valorParcela,
+            prazoMeses: novaPropostaTratativa.prazoMeses.trim(),
+            statusProposta: 'ATIVA',
+            versao: 1,
+            motivoAtualizacao: '',
+            dataCriacao: dataHojeISO,
+            dataAtualizacao: dataHojeISO,
+            historicoVersoes: []
+        };
+
+        const atualizada = [...listaAtual, novaProp];
+        const textoLog = `Nova proposta adicionada (${novaProp.titulo}): Crédito ${novaProp.valorCredito}${
+            novaProp.valorParcela ? ` • Parcela ${novaProp.valorParcela}` : ''
+        }.`;
+
+        try {
+            await persistirPropostasNoLead(leadSelecionado, atualizada, textoLog);
+            setNovaPropostaTratativa({
+                titulo: `Opção ${atualizada.length + 1}`,
+                tipoCarta: 'Imobiliária',
+                valorCredito: '',
+                valorParcela: '',
+                prazoMeses: ''
+            });
+            toast.success('Nova proposta adicionada à tratativa!');
+        } catch (err) {
+            toast.error('Erro ao adicionar proposta.');
+        }
+    };
+
+    const iniciarRevisaoProposta = (proposta) => {
+        setPropostaEmRevisaoId(proposta.id);
+        setFormRevisaoProposta({
+            titulo: proposta.titulo,
+            tipoCarta: proposta.tipoCarta || 'Imobiliária',
+            valorCredito: proposta.valorCredito || '',
+            valorParcela: proposta.valorParcela || '',
+            prazoMeses: proposta.prazoMeses || '',
+            motivoAtualizacao: ''
+        });
+    };
+
+    const confirmarRevisaoProposta = async (e) => {
+        e.preventDefault();
+        if (moedaParaNumero(formRevisaoProposta.valorCredito) <= 0) {
+            return toast.error('Informe o novo valor de crédito.');
+        }
+
+        const listaAtual = obterListaPropostasLead(leadSelecionado);
+        let logTexto = '';
+
+        const atualizada = listaAtual.map((p) => {
+            if (p.id !== propostaEmRevisaoId) return p;
+
+            const versaoAnterior = Number(p.versao || 1);
+            const novaVersao = versaoAnterior + 1;
+            const snapshotAnterior = {
+                versao: versaoAnterior,
+                valorCredito: p.valorCredito,
+                valorParcela: p.valorParcela,
+                prazoMeses: p.prazoMeses,
+                motivo: formRevisaoProposta.motivoAtualizacao.trim() || 'Reajuste de proposta',
+                data: dataHojeISO
+            };
+
+            logTexto = `Proposta "${formRevisaoProposta.titulo}" refeita (v${novaVersao}): Crédito ${formRevisaoProposta.valorCredito}${
+                formRevisaoProposta.valorParcela ? ` • Parcela ${formRevisaoProposta.valorParcela}` : ''
+            }${
+                formRevisaoProposta.motivoAtualizacao.trim()
+                    ? ` (${formRevisaoProposta.motivoAtualizacao.trim()})`
+                    : ''
+            }.`;
+
+            return {
+                ...p,
+                titulo: formRevisaoProposta.titulo.trim() || p.titulo,
+                tipoCarta: formRevisaoProposta.tipoCarta,
+                valorCredito: formRevisaoProposta.valorCredito,
+                valorParcela: formRevisaoProposta.valorParcela,
+                prazoMeses: formRevisaoProposta.prazoMeses.trim(),
+                statusProposta: 'ATIVA',
+                versao: novaVersao,
+                motivoAtualizacao: formRevisaoProposta.motivoAtualizacao.trim(),
+                dataAtualizacao: dataHojeISO,
+                historicoVersoes: [snapshotAnterior, ...(p.historicoVersoes || [])]
+            };
+        });
+
+        try {
+            await persistirPropostasNoLead(leadSelecionado, atualizada, logTexto);
+            setPropostaEmRevisaoId(null);
+            toast.success('Proposta atualizada e versão anterior salva no histórico!');
+        } catch (err) {
+            toast.error('Erro ao atualizar proposta.');
+        }
+    };
+
+    const alterarStatusProposta = async (propostaId, novoStatus) => {
+        const listaAtual = obterListaPropostasLead(leadSelecionado);
+        const atualizada = listaAtual.map((p) =>
+            p.id === propostaId ? { ...p, statusProposta: novoStatus, dataAtualizacao: dataHojeISO } : p
+        );
+
+        try {
+            await persistirPropostasNoLead(leadSelecionado, atualizada, '');
+            toast.success(`Status da proposta alterado para ${novoStatus}.`);
+        } catch (err) {
+            toast.error('Erro ao alterar status da proposta.');
+        }
+    };
+
+    const removerPropostaTratativa = async (propostaId) => {
+        if (!window.confirm('Remover esta proposta da tratativa?')) return;
+        const listaAtual = obterListaPropostasLead(leadSelecionado);
+        const atualizada = listaAtual.filter((p) => p.id !== propostaId);
+        try {
+            await persistirPropostasNoLead(leadSelecionado, atualizada, '');
+            toast.success('Proposta removida.');
+        } catch (err) {
+            toast.error('Erro ao remover proposta.');
+        }
+    };
+
+    // ========================================================================
+    // 6. FOLLOW-UP & GATILHOS DE RETOMADA
     // ========================================================================
     const abrirModalFollowUp = (lead) => {
         setLeadSelecionado(lead);
@@ -400,7 +757,7 @@ export default function LeadsPage() {
     };
 
     // ========================================================================
-    // 6. MOVIMENTAÇÃO E TRAVAS DO FUNIL KANBAN
+    // 7. MOVIMENTAÇÃO E TRAVAS DO FUNIL KANBAN
     // ========================================================================
     const iniciarMovimentoLead = async (lead, direcao) => {
         const estagios = ['novo', 'contato', 'proposta', 'fechado'];
@@ -421,17 +778,36 @@ export default function LeadsPage() {
             setDadosContato({ data: lead.dataReuniao || dataHojeISO, hora: lead.horaReuniao || '' });
             setModalAtivo('contato');
         } else if (lead.status === 'contato') {
-            setValorNegociadoInput(lead.valorNegociado || '');
+            const propsExistentes = obterListaPropostasLead(lead);
+            const primeira = propsExistentes[0];
+            setPrimeiraPropostaForm({
+                titulo: primeira?.titulo || 'Proposta Principal',
+                tipoCarta: primeira?.tipoCarta || 'Imobiliária',
+                valorCredito: primeira?.valorCredito || lead.valorNegociado || '',
+                valorParcela: primeira?.valorParcela || '',
+                prazoMeses: primeira?.prazoMeses || ''
+            });
             setModalAtivo('proposta');
         } else if (lead.status === 'proposta') {
             const cliVinculado = lead.clienteExistenteId
                 ? clientesExistentes.find(c => c.id === lead.clienteExistenteId)
                 : null;
+            const propsLead = obterListaPropostasLead(lead);
+            const propAtivaPrincipal =
+                propsLead.find((p) => p.statusProposta === 'APROVADA') ||
+                propsLead.find((p) => p.statusProposta === 'ATIVA') ||
+                propsLead[0];
 
             setDadosFechamento({
-                valorFechado: lead.valorFechado || lead.valorNegociado || '',
+                valorFechado:
+                    lead.valorFechado ||
+                    propAtivaPrincipal?.valorCredito ||
+                    lead.valorNegociado ||
+                    '',
+                propostaAprovadaId: propAtivaPrincipal?.id || '',
                 nomeCompleto: cliVinculado?.nomeCompleto || lead.nomeCompleto || lead.nome || '',
                 telefone: cliVinculado?.telefone || lead.telefone || '',
+                instagram: lead.instagram || '',
                 cpf: cliVinculado?.cpf || lead.cpf || '',
                 dataNascimento: cliVinculado?.dataNascimento || lead.dataNascimento || '',
                 clienteExistenteId: cliVinculado?.id || lead.clienteExistenteId || ''
@@ -474,25 +850,48 @@ export default function LeadsPage() {
 
     const confirmarAvancoProposta = async (e) => {
         e.preventDefault();
-        if (moedaParaNumero(valorNegociadoInput) <= 0) {
-            return toast.error('Informe um valor negociado válido!');
+        if (moedaParaNumero(primeiraPropostaForm.valorCredito) <= 0) {
+            return toast.error('Informe o valor de crédito negociado!');
         }
+
+        const propsAtuais = obterListaPropostasLead(leadSelecionado);
+        const novaProposta = {
+            id: `prop-${Date.now()}`,
+            titulo: primeiraPropostaForm.titulo.trim() || 'Proposta Principal',
+            tipoCarta: primeiraPropostaForm.tipoCarta,
+            valorCredito: primeiraPropostaForm.valorCredito,
+            valorParcela: primeiraPropostaForm.valorParcela,
+            prazoMeses: primeiraPropostaForm.prazoMeses.trim(),
+            statusProposta: 'ATIVA',
+            versao: 1,
+            motivoAtualizacao: '',
+            dataCriacao: dataHojeISO,
+            dataAtualizacao: dataHojeISO,
+            historicoVersoes: []
+        };
+
+        const listaFinal = propsAtuais.length > 0 ? propsAtuais : [novaProposta];
+        const resumo = calcularResumoPropostasLead(listaFinal);
+        const textoLog = `Proposta apresentada: Crédito ${primeiraPropostaForm.valorCredito}${
+            primeiraPropostaForm.valorParcela ? ` • Parcela ${primeiraPropostaForm.valorParcela}` : ''
+        }.`;
 
         try {
             await updateDoc(doc(db, 'leads', leadSelecionado.id), {
                 status: 'proposta',
-                valorNegociado: valorNegociadoInput,
+                propostas: listaFinal,
+                valorNegociado: resumo.somaCreditoFormatado || primeiraPropostaForm.valorCredito,
                 ultimoFollowUpData: dataHojeISO,
-                ultimoFollowUpTexto: `Proposta apresentada no valor de ${valorNegociadoInput}.`,
+                ultimoFollowUpTexto: textoLog,
                 proximoFollowUpData: adicionarDiasISO(2),
                 gatilhoFollowUp: 'Retorno agendado após proposta'
             });
 
             setModalAtivo(null);
             setLeadSelecionado(null);
-            toast.success('Proposta registrada e gatilho de retorno ativado para 2 dias!');
+            toast.success('Proposta registrada e gatilho de retorno ativado!');
         } catch (error) {
-            toast.error('Erro ao salvar valor negociado.');
+            toast.error('Erro ao salvar proposta.');
         }
     };
 
@@ -557,6 +956,13 @@ export default function LeadsPage() {
             return toast.error('Preencha Nome Completo, Telefone, CPF válido e Data de Nascimento.');
         }
 
+        const propsLead = obterListaPropostasLead(leadSelecionado);
+        const propsAtualizadas = propsLead.map((p) =>
+            p.id === dadosFechamento.propostaAprovadaId
+                ? { ...p, statusProposta: 'APROVADA', dataAtualizacao: dataHojeISO }
+                : p
+        );
+
         try {
             await updateDoc(doc(db, 'leads', leadSelecionado.id), {
                 status: 'fechado',
@@ -566,7 +972,8 @@ export default function LeadsPage() {
                 cpf: dadosFechamento.cpf,
                 dataNascimento: dadosFechamento.dataNascimento,
                 clienteExistenteId: dadosFechamento.clienteExistenteId || '',
-                valorFechado: dadosFechamento.valorFechado
+                valorFechado: dadosFechamento.valorFechado,
+                propostas: propsAtualizadas
             });
 
             setModalAtivo(null);
@@ -578,28 +985,38 @@ export default function LeadsPage() {
     };
 
     // ========================================================================
-    // 7. CONVERSÃO FINAL (CLIENTE + VENDA + PARCELAS + COMPETÊNCIA DA NOTA)
+    // 8. CONVERSÃO FINAL (CLIENTE + VENDA + PARCELAS + COMPETÊNCIA DA NOTA)
     // ========================================================================
     const abrirModalConversao = (lead) => {
         setLeadSelecionado(lead);
+        const propsLead = obterListaPropostasLead(lead);
+        const propAprovada =
+            propsLead.find((p) => p.statusProposta === 'APROVADA') ||
+            propsLead.find((p) => p.statusProposta === 'ATIVA') ||
+            propsLead[0];
+
+        const planoPadraoPreferido =
+            planosComissao.find((p) => p.isPadrao === true) ||
+            planosComissao.find((p) => p.id === localStorage.getItem(`plano_padrao_crm_${user?.uid}`)) ||
+            planosComissao[0];
+
         setFormConversao({
             nomeCompleto: lead.nomeCompleto || lead.nome || '',
             telefone: lead.telefone || '',
             cpf: lead.cpf || '',
             dataNascimento: lead.dataNascimento || '',
             clienteExistenteId: lead.clienteExistenteId || '',
-            tipoCarta: 'Imobiliária',
-            valorTotalCarta: lead.valorFechado || '',
+            tipoCarta: propAprovada?.tipoCarta || 'Imobiliária',
+            valorTotalCarta: lead.valorFechado || propAprovada?.valorCredito || '',
             dataVenda: dataHojeISO,
             competenciaNota: sugerirCompetenciaNota(dataHojeISO),
             grupo: '',
             cota: '',
-            planoComissaoId: planosComissao[0]?.id || ''
+            planoComissaoId: planoPadraoPreferido?.id || ''
         });
         setModalAtivo('converter');
     };
 
-    // Atualiza a data da venda e já ajusta a sugestão padrão da nota (que o usuário pode alterar livremente)
     const handleAlterarDataVendaConversao = (novaDataISO) => {
         setFormConversao((prev) => ({
             ...prev,
@@ -710,7 +1127,7 @@ export default function LeadsPage() {
             : null;
 
     // ========================================================================
-    // 8. ANOTAÇÕES E REUNIÕES MANUAIS
+    // 9. ANOTAÇÕES E REUNIÕES MANUAIS
     // ========================================================================
     const handleAddAnotacao = async (e) => {
         if (e.key === 'Enter' && novaAnotacao.trim()) {
@@ -771,7 +1188,7 @@ export default function LeadsPage() {
     };
 
     // ========================================================================
-    // 9. INDICADORES (KPIs) E FILTROS DO PIPELINE
+    // 10. INDICADORES (KPIs) E FILTROS DO PIPELINE
     // ========================================================================
     const precisaFollowUp = (lead) => {
         if (lead.status === 'fechado') return false;
@@ -782,7 +1199,11 @@ export default function LeadsPage() {
 
     const resumoPipeline = useMemo(() => {
         const emProposta = leads.filter(l => l.status === 'proposta');
-        const valorPropostas = emProposta.reduce((acc, l) => acc + moedaParaNumero(l.valorNegociado), 0);
+        const valorPropostas = emProposta.reduce((acc, l) => {
+            const props = obterListaPropostasLead(l);
+            const resumo = calcularResumoPropostasLead(props);
+            return acc + (resumo.somaCredito > 0 ? resumo.somaCredito : moedaParaNumero(l.valorNegociado));
+        }, 0);
 
         const fechadosPendentes = leads.filter(l => l.status === 'fechado');
         const valorFechados = fechadosPendentes.reduce((acc, l) => acc + moedaParaNumero(l.valorFechado), 0);
@@ -807,7 +1228,8 @@ export default function LeadsPage() {
             if (termo) {
                 const nome = (lead.nome || '').toLowerCase();
                 const tel = (lead.telefone || '').toLowerCase();
-                if (!nome.includes(termo) && !tel.includes(termo)) return false;
+                const insta = (lead.instagram || '').toLowerCase();
+                if (!nome.includes(termo) && !tel.includes(termo) && !insta.includes(termo)) return false;
             }
             return true;
         });
@@ -823,18 +1245,17 @@ export default function LeadsPage() {
     );
 
     // ========================================================================
-    // 10. RENDERIZAÇÃO DA INTERFACE
+    // 11. RENDERIZAÇÃO DA INTERFACE
     // ========================================================================
     return (
         <div className="p-4 md:p-8 animate-in fade-in duration-300 max-w-[1700px] mx-auto relative">
-            {/* CABEÇALHO LIMPO COM BOTÃO DE NOVO LEAD */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
                 <div>
                     <h1 className="text-3xl font-black text-white">
                         Gestão de <span className="text-red-600">Leads</span>
                     </h1>
                     <p className="text-gray-400 mt-1 text-sm">
-                        Acompanhe negociações no funil, registre follow-ups e converta fechamentos em vendas.
+                        Acompanhe negociações no funil, gerencie propostas com parcela acordada e converta fechamentos.
                     </p>
                 </div>
 
@@ -874,7 +1295,7 @@ export default function LeadsPage() {
                         </p>
                         <p className="text-xs text-gray-500 mt-1">
                             {resumoPipeline.qtdPropostas}{' '}
-                            {resumoPipeline.qtdPropostas === 1 ? 'proposta ativa' : 'propostas ativas'}
+                            {resumoPipeline.qtdPropostas === 1 ? 'tratativa ativa' : 'tratativas ativas'}
                         </p>
                     </div>
                     <div className="w-12 h-12 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
@@ -929,7 +1350,6 @@ export default function LeadsPage() {
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                 {/* PIPELINE KANBAN */}
                 <div className="lg:col-span-8 xl:col-span-9 bg-dark-card border border-dark-border p-6 rounded-3xl shadow-lg flex flex-col min-h-160 lg:h-[calc(100vh-220px)]">
-                    {/* Barra de Filtros do Kanban */}
                     <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 mb-5 border-b border-white/5 pb-4 shrink-0">
                         <div className="flex items-center gap-3">
                             <h2 className="text-lg font-bold text-white flex items-center gap-2">
@@ -945,7 +1365,7 @@ export default function LeadsPage() {
                                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                                 <input
                                     type="text"
-                                    placeholder="Buscar lead ou telefone..."
+                                    placeholder="Buscar nome, tel ou @insta..."
                                     value={buscaTexto}
                                     onChange={(e) => setBuscaTexto(e.target.value)}
                                     className="w-full bg-black/50 border border-white/10 rounded-xl pl-8 pr-7 py-1.5 text-xs text-white outline-none focus:border-red-500"
@@ -990,7 +1410,6 @@ export default function LeadsPage() {
                         </div>
                     </div>
 
-                    {/* Colunas do Kanban */}
                     <div className="flex-1 overflow-x-auto custom-scrollbar pb-2">
                         {carregando ? (
                             <div className="flex justify-center items-center h-full text-red-500 animate-pulse font-bold">
@@ -998,10 +1417,54 @@ export default function LeadsPage() {
                             </div>
                         ) : (
                             <div className="flex gap-4 h-full min-w-230">
-                                {renderKanbanColumn('Novos Leads', leadsNovo, 'blue', iniciarMovimentoLead, abrirModalConversao, abrirModalFollowUp, editarLead, excluirLead, dataHojeISO)}
-                                {renderKanbanColumn('Em Contato', leadsContato, 'amber', iniciarMovimentoLead, abrirModalConversao, abrirModalFollowUp, editarLead, excluirLead, dataHojeISO)}
-                                {renderKanbanColumn('Proposta', leadsProposta, 'purple', iniciarMovimentoLead, abrirModalConversao, abrirModalFollowUp, editarLead, excluirLead, dataHojeISO)}
-                                {renderKanbanColumn('Fechados', leadsFechado, 'emerald', iniciarMovimentoLead, abrirModalConversao, abrirModalFollowUp, editarLead, excluirLead, dataHojeISO)}
+                                {renderKanbanColumn(
+                                    'Novos Leads',
+                                    leadsNovo,
+                                    'blue',
+                                    iniciarMovimentoLead,
+                                    abrirModalConversao,
+                                    abrirModalFollowUp,
+                                    abrirModalEditarLead,
+                                    abrirModalPropostasLead,
+                                    excluirLead,
+                                    dataHojeISO
+                                )}
+                                {renderKanbanColumn(
+                                    'Em Contato',
+                                    leadsContato,
+                                    'amber',
+                                    iniciarMovimentoLead,
+                                    abrirModalConversao,
+                                    abrirModalFollowUp,
+                                    abrirModalEditarLead,
+                                    abrirModalPropostasLead,
+                                    excluirLead,
+                                    dataHojeISO
+                                )}
+                                {renderKanbanColumn(
+                                    'Proposta',
+                                    leadsProposta,
+                                    'purple',
+                                    iniciarMovimentoLead,
+                                    abrirModalConversao,
+                                    abrirModalFollowUp,
+                                    abrirModalEditarLead,
+                                    abrirModalPropostasLead,
+                                    excluirLead,
+                                    dataHojeISO
+                                )}
+                                {renderKanbanColumn(
+                                    'Fechados',
+                                    leadsFechado,
+                                    'emerald',
+                                    iniciarMovimentoLead,
+                                    abrirModalConversao,
+                                    abrirModalFollowUp,
+                                    abrirModalEditarLead,
+                                    abrirModalPropostasLead,
+                                    excluirLead,
+                                    dataHojeISO
+                                )}
                             </div>
                         )}
                     </div>
@@ -1138,11 +1601,11 @@ export default function LeadsPage() {
             </div>
 
             {/* ====================================================================
-                MODAL 0: CADASTRAR NOVO LEAD / OPORTUNIDADE DE RECOMPRA
+                MODAL 0: CADASTRAR NOVO LEAD (TELEFONE OU INSTAGRAM)
             ==================================================================== */}
             {modalAtivo === 'novoLead' && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
-                    <div className="bg-dark-card border border-dark-border rounded-3xl shadow-2xl p-6 w-full max-w-lg relative animate-in fade-in duration-200">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 overflow-y-auto">
+                    <div className="bg-dark-card border border-dark-border rounded-3xl shadow-2xl p-6 w-full max-w-lg relative my-8 animate-in fade-in duration-200">
                         <button onClick={() => setModalAtivo(null)} className="absolute top-4 right-4 text-gray-400 hover:text-white">
                             <X size={20} />
                         </button>
@@ -1150,7 +1613,7 @@ export default function LeadsPage() {
                             <Plus className="text-red-600" /> Novo Lead no Funil
                         </h2>
                         <p className="text-xs text-gray-400 mb-5">
-                            Cadastre um novo contato ou vincule um cliente já existente para abrir uma oportunidade de recompra.
+                            Informe o nome e pelo menos um canal de contato (WhatsApp/Telefone ou Instagram).
                         </p>
 
                         <form onSubmit={handleAddLead} className="flex flex-col gap-4">
@@ -1188,10 +1651,11 @@ export default function LeadsPage() {
 
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-400 mb-1">Telefone / WhatsApp *</label>
+                                    <label className="block text-xs font-bold text-gray-400 mb-1">
+                                        Telefone / WhatsApp
+                                    </label>
                                     <input
                                         type="text"
-                                        required
                                         placeholder="(00) 00000-0000"
                                         value={novoLead.telefone}
                                         onChange={(e) => setNovoLead({ ...novoLead, telefone: formatarTelefone(e.target.value) })}
@@ -1199,6 +1663,22 @@ export default function LeadsPage() {
                                     />
                                 </div>
 
+                                <div>
+                                    <label className="block text-xs font-bold text-pink-400 mb-1 items-center gap-1">
+                                        <InstagramIcon size={12} /> Instagram (Direto)
+                                    </label>
+                                    <input
+                                        type="text"
+                                        placeholder="@usuario"
+                                        value={novoLead.instagram}
+                                        onChange={(e) => setNovoLead({ ...novoLead, instagram: e.target.value })}
+                                        onBlur={(e) => setNovoLead({ ...novoLead, instagram: formatarInstagram(e.target.value) })}
+                                        className="w-full bg-black/50 border border-pink-500/25 rounded-xl px-3.5 py-2.5 text-sm text-white outline-none focus:border-pink-500"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>
                                     <label className="block text-xs font-bold text-gray-400 mb-1">Data de Chegada *</label>
                                     <input
@@ -1209,20 +1689,20 @@ export default function LeadsPage() {
                                         className="w-full bg-black/50 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white outline-none focus:border-red-500"
                                     />
                                 </div>
-                            </div>
 
-                            <div>
-                                <label className="block text-xs font-bold text-gray-400 mb-1">Origem do Lead *</label>
-                                <select
-                                    required
-                                    value={novoLead.origem}
-                                    onChange={(e) => setNovoLead({ ...novoLead, origem: e.target.value })}
-                                    className="w-full bg-black/50 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white outline-none focus:border-red-500"
-                                >
-                                    {ORIGENS_LEAD.map((orig) => (
-                                        <option key={orig} value={orig}>{orig}</option>
-                                    ))}
-                                </select>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-400 mb-1">Origem do Lead *</label>
+                                    <select
+                                        required
+                                        value={novoLead.origem}
+                                        onChange={(e) => setNovoLead({ ...novoLead, origem: e.target.value })}
+                                        className="w-full bg-black/50 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white outline-none focus:border-red-500"
+                                    >
+                                        {ORIGENS_LEAD.map((orig) => (
+                                            <option key={orig} value={orig}>{orig}</option>
+                                        ))}
+                                    </select>
+                                </div>
                             </div>
 
                             <button
@@ -1235,6 +1715,474 @@ export default function LeadsPage() {
                     </div>
                 </div>
             )}
+
+            {/* ====================================================================
+                MODAL 0.5: EDITAR DADOS DO LEAD + ATALHO PARA PROPOSTAS
+            ==================================================================== */}
+            {modalAtivo === 'editarLead' && leadSelecionado && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 overflow-y-auto">
+                    <div className="bg-dark-card border border-dark-border rounded-3xl shadow-2xl p-6 w-full max-w-lg relative my-8 animate-in fade-in duration-200">
+                        <button onClick={() => setModalAtivo(null)} className="absolute top-4 right-4 text-gray-400 hover:text-white">
+                            <X size={20} />
+                        </button>
+                        <h2 className="text-xl font-bold text-white mb-1 flex items-center gap-2">
+                            <Edit2 className="text-red-500" size={19} /> Editar Dados do Lead
+                        </h2>
+                        <p className="text-xs text-gray-400 mb-5">
+                            Atualize contato, Instagram, origem ou abra a central de propostas desta tratativa.
+                        </p>
+
+                        <form onSubmit={salvarEdicaoLead} className="flex flex-col gap-4">
+                            <div>
+                                <label className="block text-xs font-bold text-gray-400 mb-1">Nome do Lead *</label>
+                                <input
+                                    type="text"
+                                    required
+                                    value={formEditarLead.nome}
+                                    onChange={(e) => setFormEditarLead({ ...formEditarLead, nome: e.target.value })}
+                                    className="w-full bg-black/50 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white outline-none focus:border-red-500"
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-400 mb-1">Telefone / WhatsApp</label>
+                                    <input
+                                        type="text"
+                                        placeholder="(00) 00000-0000"
+                                        value={formEditarLead.telefone}
+                                        onChange={(e) => setFormEditarLead({ ...formEditarLead, telefone: formatarTelefone(e.target.value) })}
+                                        className="w-full bg-black/50 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white outline-none focus:border-red-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-bold text-pink-400 mb-1 items-center gap-1">
+                                        <InstagramIcon size={12} /> Instagram
+                                    </label>
+                                    <input
+                                        type="text"
+                                        placeholder="@usuario"
+                                        value={formEditarLead.instagram}
+                                        onChange={(e) => setFormEditarLead({ ...formEditarLead, instagram: e.target.value })}
+                                        onBlur={(e) => setFormEditarLead({ ...formEditarLead, instagram: formatarInstagram(e.target.value) })}
+                                        className="w-full bg-black/50 border border-pink-500/25 rounded-xl px-3.5 py-2.5 text-sm text-white outline-none focus:border-pink-500"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-400 mb-1">Data de Chegada *</label>
+                                    <input
+                                        type="date"
+                                        required
+                                        value={formEditarLead.dataChegada}
+                                        onChange={(e) => setFormEditarLead({ ...formEditarLead, dataChegada: e.target.value })}
+                                        className="w-full bg-black/50 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white outline-none focus:border-red-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-400 mb-1">Origem *</label>
+                                    <select
+                                        value={formEditarLead.origem}
+                                        onChange={(e) => setFormEditarLead({ ...formEditarLead, origem: e.target.value })}
+                                        className="w-full bg-black/50 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white outline-none focus:border-red-500"
+                                    >
+                                        {ORIGENS_LEAD.map((orig) => (
+                                            <option key={orig} value={orig}>{orig}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div className="bg-purple-500/10 border border-purple-500/25 p-3.5 rounded-2xl flex items-center justify-between gap-3">
+                                <div>
+                                    <p className="text-xs font-bold text-purple-300">Propostas & Parcela Acordada</p>
+                                    <p className="text-[11px] text-gray-400">
+                                        Adicione opções, edite valores ou refaça propostas desta tratativa.
+                                    </p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => abrirModalPropostasLead(leadSelecionado)}
+                                    className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold px-3 py-2 rounded-xl shrink-0 transition-colors"
+                                >
+                                    Abrir Propostas
+                                </button>
+                            </div>
+
+                            <button
+                                type="submit"
+                                className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl mt-1 transition-colors"
+                            >
+                                Salvar Alterações
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* ====================================================================
+                MODAL 0.8: CENTRAL DE PROPOSTAS DA TRATATIVA (MÚLTIPLAS + REVISÕES)
+            ==================================================================== */}
+            {modalAtivo === 'propostasLead' && leadSelecionado && (() => {
+                const listaPropostas = obterListaPropostasLead(leadSelecionado);
+                const resumoProps = calcularResumoPropostasLead(listaPropostas);
+
+                return (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 overflow-y-auto">
+                        <div className="bg-dark-card border border-dark-border rounded-3xl shadow-2xl p-6 w-full max-w-3xl relative my-8 animate-in fade-in duration-200">
+                            <button onClick={() => setModalAtivo(null)} className="absolute top-4 right-4 text-gray-400 hover:text-white">
+                                <X size={20} />
+                            </button>
+
+                            <div className="flex flex-wrap items-start justify-between gap-3 pr-8 mb-5 border-b border-white/5 pb-4">
+                                <div>
+                                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                                        <Layers className="text-purple-400" size={20} />
+                                        Propostas da Tratativa — {leadSelecionado.nome}
+                                    </h2>
+                                    <p className="text-xs text-gray-400 mt-0.5">
+                                        Adicione mais de uma opção de carta, registre a parcela acordada e controle revisões caso refaça a proposta.
+                                    </p>
+                                </div>
+
+                                {resumoProps.somaCredito > 0 && (
+                                    <div className="bg-purple-500/15 border border-purple-500/30 px-3.5 py-2 rounded-xl text-right">
+                                        <span className="block text-[10px] uppercase font-bold text-purple-300">
+                                            Total Ativo na Mesa
+                                        </span>
+                                        <strong className="text-sm font-black text-white">
+                                            {resumoProps.somaCreditoFormatado}
+                                        </strong>
+                                        {resumoProps.somaParcela > 0 && (
+                                            <span className="block text-[11px] text-emerald-400 font-bold">
+                                                Parcela(s): {resumoProps.somaParcelaFormatado}/mês
+                                            </span>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="flex flex-col gap-3 mb-6 max-h-[42vh] overflow-y-auto custom-scrollbar pr-1">
+                                {listaPropostas.length === 0 ? (
+                                    <p className="text-xs text-gray-500 italic text-center py-6 bg-black/30 rounded-2xl border border-white/5">
+                                        Nenhuma proposta cadastrada ainda. Use o formulário abaixo para lançar a primeira!
+                                    </p>
+                                ) : (
+                                    listaPropostas.map((prop) => {
+                                        const emRevisao = propostaEmRevisaoId === prop.id;
+                                        const historicoAberto = historicoPropostaAbertoId === prop.id;
+                                        const qtdVersoesAntigas = Array.isArray(prop.historicoVersoes)
+                                            ? prop.historicoVersoes.length
+                                            : 0;
+
+                                        return (
+                                            <div
+                                                key={prop.id}
+                                                className={`bg-black/40 border rounded-2xl p-4 transition-all ${
+                                                    prop.statusProposta === 'APROVADA'
+                                                        ? 'border-emerald-500/50'
+                                                        : prop.statusProposta === 'RECUSADA'
+                                                            ? 'border-white/5 opacity-60'
+                                                            : 'border-purple-500/25'
+                                                }`}
+                                            >
+                                                {emRevisao ? (
+                                                    <form onSubmit={confirmarRevisaoProposta} className="flex flex-col gap-3">
+                                                        <div className="flex items-center justify-between">
+                                                            <span className="text-xs font-black uppercase text-amber-400 flex items-center gap-1.5">
+                                                                <RotateCcw size={13} /> Refazendo / Atualizando Proposta (Nova v{(prop.versao || 1) + 1})
+                                                            </span>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setPropostaEmRevisaoId(null)}
+                                                                className="text-xs text-gray-400 hover:text-white"
+                                                            >
+                                                                Cancelar
+                                                            </button>
+                                                        </div>
+
+                                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                                                            <div>
+                                                                <label className="block text-[11px] text-gray-400 mb-1">Título</label>
+                                                                <input
+                                                                    type="text"
+                                                                    value={formRevisaoProposta.titulo}
+                                                                    onChange={(e) => setFormRevisaoProposta({ ...formRevisaoProposta, titulo: e.target.value })}
+                                                                    className="w-full bg-black/60 border border-white/10 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-amber-500"
+                                                                />
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-[11px] text-gray-400 mb-1">Segmento</label>
+                                                                <select
+                                                                    value={formRevisaoProposta.tipoCarta}
+                                                                    onChange={(e) => setFormRevisaoProposta({ ...formRevisaoProposta, tipoCarta: e.target.value })}
+                                                                    className="w-full bg-black/60 border border-white/10 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-amber-500"
+                                                                >
+                                                                    <option value="Imobiliária">Imobiliária</option>
+                                                                    <option value="Automotiva">Automotiva</option>
+                                                                    <option value="Serviços">Serviços</option>
+                                                                </select>
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-[11px] text-gray-400 mb-1">Prazo (meses)</label>
+                                                                <input
+                                                                    type="text"
+                                                                    placeholder="Ex: 180"
+                                                                    value={formRevisaoProposta.prazoMeses}
+                                                                    onChange={(e) => setFormRevisaoProposta({ ...formRevisaoProposta, prazoMeses: e.target.value })}
+                                                                    className="w-full bg-black/60 border border-white/10 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-amber-500"
+                                                                />
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                                            <div>
+                                                                <label className="block text-[11px] font-bold text-purple-300 mb-1">Novo Valor de Crédito *</label>
+                                                                <input
+                                                                    required
+                                                                    type="text"
+                                                                    value={formRevisaoProposta.valorCredito}
+                                                                    onChange={(e) => setFormRevisaoProposta({ ...formRevisaoProposta, valorCredito: formatarMoeda(e.target.value) })}
+                                                                    className="w-full bg-black/60 border border-purple-500/30 rounded-lg px-3 py-2 text-sm font-bold text-white outline-none focus:border-amber-500"
+                                                                />
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-[11px] font-bold text-emerald-400 mb-1">Nova Parcela Acordada</label>
+                                                                <input
+                                                                    type="text"
+                                                                    placeholder="R$ 0,00"
+                                                                    value={formRevisaoProposta.valorParcela}
+                                                                    onChange={(e) => setFormRevisaoProposta({ ...formRevisaoProposta, valorParcela: formatarMoeda(e.target.value) })}
+                                                                    className="w-full bg-black/60 border border-emerald-500/30 rounded-lg px-3 py-2 text-sm font-bold text-emerald-400 outline-none focus:border-amber-500"
+                                                                />
+                                                            </div>
+                                                        </div>
+
+                                                        <div>
+                                                            <label className="block text-[11px] text-gray-400 mb-1">Motivo da Atualização (Histórico)</label>
+                                                            <input
+                                                                type="text"
+                                                                placeholder="Ex: Cliente pediu parcela menor; ajuste de crédito..."
+                                                                value={formRevisaoProposta.motivoAtualizacao}
+                                                                onChange={(e) => setFormRevisaoProposta({ ...formRevisaoProposta, motivoAtualizacao: e.target.value })}
+                                                                className="w-full bg-black/60 border border-white/10 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-amber-500"
+                                                            />
+                                                        </div>
+
+                                                        <button
+                                                            type="submit"
+                                                            className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold py-2.5 rounded-xl transition-colors"
+                                                        >
+                                                            Salvar Nova Versão (v{(prop.versao || 1) + 1})
+                                                        </button>
+                                                    </form>
+                                                ) : (
+                                                    <div>
+                                                        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-sm font-bold text-white">{prop.titulo}</span>
+                                                                <span className="text-[10px] font-black bg-white/10 text-gray-300 px-2 py-0.5 rounded">
+                                                                    v{prop.versao || 1}
+                                                                </span>
+                                                                <span className="text-[10px] font-bold bg-blue-500/15 text-blue-300 px-2 py-0.5 rounded">
+                                                                    {prop.tipoCarta || 'Imobiliária'}
+                                                                </span>
+                                                                <span
+                                                                    className={`text-[10px] font-black px-2 py-0.5 rounded ${
+                                                                        prop.statusProposta === 'APROVADA'
+                                                                            ? 'bg-emerald-500/20 text-emerald-400'
+                                                                            : prop.statusProposta === 'RECUSADA'
+                                                                                ? 'bg-red-500/20 text-red-400'
+                                                                                : 'bg-purple-500/20 text-purple-300'
+                                                                    }`}
+                                                                >
+                                                                    {prop.statusProposta}
+                                                                </span>
+                                                            </div>
+
+                                                            <div className="flex items-center gap-1.5">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => iniciarRevisaoProposta(prop)}
+                                                                    className="text-[11px] font-bold bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 px-2.5 py-1 rounded-lg inline-flex items-center gap-1 transition-colors"
+                                                                >
+                                                                    <RotateCcw size={11} /> Refazer / Atualizar
+                                                                </button>
+
+                                                                {prop.statusProposta === 'ATIVA' ? (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => alterarStatusProposta(prop.id, 'RECUSADA')}
+                                                                        className="text-[11px] font-bold bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-300 px-2.5 py-1 rounded-lg transition-colors"
+                                                                    >
+                                                                        Marcar Recusada
+                                                                    </button>
+                                                                ) : (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => alterarStatusProposta(prop.id, 'ATIVA')}
+                                                                        className="text-[11px] font-bold bg-white/5 hover:bg-emerald-500/20 text-gray-400 hover:text-emerald-300 px-2.5 py-1 rounded-lg transition-colors"
+                                                                    >
+                                                                        Reativar
+                                                                    </button>
+                                                                )}
+
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => removerPropostaTratativa(prop.id)}
+                                                                    title="Excluir proposta"
+                                                                    className="p-1 text-gray-500 hover:text-red-400"
+                                                                >
+                                                                    <Trash2 size={13} />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="flex flex-wrap items-center gap-4 text-xs mt-2">
+                                                            <div>
+                                                                <span className="text-gray-400">Crédito: </span>
+                                                                <strong className="text-white text-sm">{prop.valorCredito}</strong>
+                                                            </div>
+                                                            <div>
+                                                                <span className="text-gray-400">Parcela Acordada: </span>
+                                                                <strong className="text-emerald-400 text-sm">
+                                                                    {prop.valorParcela || 'Não informada'}
+                                                                </strong>
+                                                            </div>
+                                                            {prop.prazoMeses && (
+                                                                <div>
+                                                                    <span className="text-gray-400">Prazo: </span>
+                                                                    <strong className="text-gray-200">{prop.prazoMeses} meses</strong>
+                                                                </div>
+                                                            )}
+                                                        </div>
+
+                                                        {prop.motivoAtualizacao && (
+                                                            <p className="text-[11px] text-amber-300/90 mt-1.5">
+                                                                Último ajuste ({formatarDataBR(prop.dataAtualizacao)}): {prop.motivoAtualizacao}
+                                                            </p>
+                                                        )}
+
+                                                        {qtdVersoesAntigas > 0 && (
+                                                            <div className="mt-2.5 pt-2 border-t border-white/5">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() =>
+                                                                        setHistoricoPropostaAbertoId(
+                                                                            historicoAberto ? null : prop.id
+                                                                        )
+                                                                    }
+                                                                    className="text-[11px] text-gray-400 hover:text-white inline-flex items-center gap-1 font-bold"
+                                                                >
+                                                                    <History size={12} />
+                                                                    {historicoAberto
+                                                                        ? 'Ocultar versões anteriores'
+                                                                        : `Ver ${qtdVersoesAntigas} ${qtdVersoesAntigas === 1 ? 'versão anterior' : 'versões anteriores'}`}
+                                                                </button>
+
+                                                                {historicoAberto && (
+                                                                    <div className="mt-2 flex flex-col gap-1.5 pl-2 border-l-2 border-amber-500/30">
+                                                                        {prop.historicoVersoes.map((vAnt, idx) => (
+                                                                            <div key={idx} className="text-[11px] text-gray-400 flex flex-wrap gap-2">
+                                                                                <span className="font-bold text-gray-300">v{vAnt.versao}:</span>
+                                                                                <span>Crédito {vAnt.valorCredito}</span>
+                                                                                {vAnt.valorParcela && <span>• Parc. {vAnt.valorParcela}</span>}
+                                                                                <span>({formatarDataBR(vAnt.data)})</span>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
+
+                            <form
+                                onSubmit={handleAdicionarNovaPropostaTratativa}
+                                className="bg-black/30 border border-white/10 p-4 rounded-2xl flex flex-col gap-3"
+                            >
+                                <h3 className="text-xs font-black uppercase tracking-wider text-purple-400 flex items-center gap-1.5">
+                                    <Plus size={14} /> Adicionar Nova Opção de Proposta nesta Tratativa
+                                </h3>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                    <div>
+                                        <label className="block text-[11px] text-gray-400 mb-1">Identificação / Título</label>
+                                        <input
+                                            type="text"
+                                            placeholder="Ex: Opção 2 - Parcela Menor"
+                                            value={novaPropostaTratativa.titulo}
+                                            onChange={(e) => setNovaPropostaTratativa({ ...novaPropostaTratativa, titulo: e.target.value })}
+                                            className="w-full bg-black/50 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-purple-500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[11px] text-gray-400 mb-1">Tipo de Carta</label>
+                                        <select
+                                            value={novaPropostaTratativa.tipoCarta}
+                                            onChange={(e) => setNovaPropostaTratativa({ ...novaPropostaTratativa, tipoCarta: e.target.value })}
+                                            className="w-full bg-black/50 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-purple-500"
+                                        >
+                                            <option value="Imobiliária">Imobiliária</option>
+                                            <option value="Automotiva">Automotiva</option>
+                                            <option value="Serviços">Serviços</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-[11px] text-gray-400 mb-1">Prazo (meses)</label>
+                                        <input
+                                            type="text"
+                                            placeholder="Ex: 180"
+                                            value={novaPropostaTratativa.prazoMeses}
+                                            onChange={(e) => setNovaPropostaTratativa({ ...novaPropostaTratativa, prazoMeses: e.target.value })}
+                                            className="w-full bg-black/50 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-purple-500"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                                    <div>
+                                        <label className="block text-[11px] font-bold text-gray-300 mb-1">Valor do Crédito *</label>
+                                        <input
+                                            required
+                                            type="text"
+                                            placeholder="R$ 0,00"
+                                            value={novaPropostaTratativa.valorCredito}
+                                            onChange={(e) => setNovaPropostaTratativa({ ...novaPropostaTratativa, valorCredito: formatarMoeda(e.target.value) })}
+                                            className="w-full bg-black/50 border border-purple-500/30 rounded-xl px-3 py-2 text-sm font-bold text-white outline-none focus:border-purple-500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[11px] font-bold text-emerald-400 mb-1">Parcela Acordada</label>
+                                        <input
+                                            type="text"
+                                            placeholder="R$ 0,00"
+                                            value={novaPropostaTratativa.valorParcela}
+                                            onChange={(e) => setNovaPropostaTratativa({ ...novaPropostaTratativa, valorParcela: formatarMoeda(e.target.value) })}
+                                            className="w-full bg-black/50 border border-emerald-500/30 rounded-xl px-3 py-2 text-sm font-bold text-emerald-400 outline-none focus:border-emerald-500"
+                                        />
+                                    </div>
+                                    <button
+                                        type="submit"
+                                        className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs py-2.5 rounded-xl transition-colors flex items-center justify-center gap-1.5"
+                                    >
+                                        <Plus size={15} /> Adicionar Proposta
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                );
+            })()}
 
             {/* ====================================================================
                 MODAL 1: FOLLOW-UP & GATILHOS DE NEGOCIAÇÃO
@@ -1392,23 +2340,79 @@ export default function LeadsPage() {
             )}
 
             {/* ====================================================================
-                MODAL 3: VALOR DA PROPOSTA
+                MODAL 3: REGISTRAR PROPOSTA (CRÉDITO + PARCELA ACORDADA)
             ==================================================================== */}
             {modalAtivo === 'proposta' && leadSelecionado && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-                    <div className="bg-dark-card border border-dark-border rounded-3xl shadow-2xl p-6 w-full max-w-md relative">
+                    <div className="bg-dark-card border border-dark-border rounded-3xl shadow-2xl p-6 w-full max-w-lg relative">
                         <button onClick={() => setModalAtivo(null)} className="absolute top-4 right-4 text-gray-400 hover:text-white"><X size={20} /></button>
-                        <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
-                            <DollarSign className="text-purple-400" /> Valor da Proposta
+                        <h2 className="text-xl font-bold text-white mb-1 flex items-center gap-2">
+                            <DollarSign className="text-purple-400" /> Registrar Proposta
                         </h2>
-                        <p className="text-xs text-gray-400 mb-6">
-                            Informe o valor de crédito negociado com <strong className="text-white">{leadSelecionado.nome}</strong> para avançar.
+                        <p className="text-xs text-gray-400 mb-5">
+                            Informe o crédito e a parcela acordada com <strong className="text-white">{leadSelecionado.nome}</strong>. Depois você poderá adicionar outras opções ou refazer valores.
                         </p>
                         <form onSubmit={confirmarAvancoProposta} className="flex flex-col gap-4">
-                            <div>
-                                <label className="block text-xs font-bold text-gray-400 mb-1">Valor Negociado *</label>
-                                <input required type="text" placeholder="R$ 0,00" value={valorNegociadoInput} onChange={e => setValorNegociadoInput(formatarMoeda(e.target.value))} className="w-full bg-black/50 border border-white/10 rounded-lg p-3 text-white text-lg font-bold outline-none focus:border-purple-500" />
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-400 mb-1">Identificação</label>
+                                    <input
+                                        type="text"
+                                        value={primeiraPropostaForm.titulo}
+                                        onChange={e => setPrimeiraPropostaForm({ ...primeiraPropostaForm, titulo: e.target.value })}
+                                        className="w-full bg-black/50 border border-white/10 rounded-xl p-2.5 text-sm text-white outline-none focus:border-purple-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-400 mb-1">Tipo de Carta</label>
+                                    <select
+                                        value={primeiraPropostaForm.tipoCarta}
+                                        onChange={e => setPrimeiraPropostaForm({ ...primeiraPropostaForm, tipoCarta: e.target.value })}
+                                        className="w-full bg-black/50 border border-white/10 rounded-xl p-2.5 text-sm text-white outline-none focus:border-purple-500"
+                                    >
+                                        <option value="Imobiliária">Imobiliária</option>
+                                        <option value="Automotiva">Automotiva</option>
+                                        <option value="Serviços">Serviços</option>
+                                    </select>
+                                </div>
                             </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs font-bold text-purple-300 mb-1">Valor do Crédito *</label>
+                                    <input
+                                        required
+                                        type="text"
+                                        placeholder="R$ 0,00"
+                                        value={primeiraPropostaForm.valorCredito}
+                                        onChange={e => setPrimeiraPropostaForm({ ...primeiraPropostaForm, valorCredito: formatarMoeda(e.target.value) })}
+                                        className="w-full bg-black/50 border border-purple-500/30 rounded-xl p-3 text-white text-base font-bold outline-none focus:border-purple-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-bold text-emerald-400 mb-1">Parcela Acordada</label>
+                                    <input
+                                        type="text"
+                                        placeholder="R$ 0,00"
+                                        value={primeiraPropostaForm.valorParcela}
+                                        onChange={e => setPrimeiraPropostaForm({ ...primeiraPropostaForm, valorParcela: formatarMoeda(e.target.value) })}
+                                        className="w-full bg-black/50 border border-emerald-500/30 rounded-xl p-3 text-emerald-400 text-base font-bold outline-none focus:border-emerald-500"
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-400 mb-1">Prazo em Meses (Opcional)</label>
+                                <input
+                                    type="text"
+                                    placeholder="Ex: 180"
+                                    value={primeiraPropostaForm.prazoMeses}
+                                    onChange={e => setPrimeiraPropostaForm({ ...primeiraPropostaForm, prazoMeses: e.target.value })}
+                                    className="w-full bg-black/50 border border-white/10 rounded-xl p-2.5 text-sm text-white outline-none focus:border-purple-500"
+                                />
+                            </div>
+
                             <button type="submit" className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-xl mt-2 transition-colors">
                                 Salvar Proposta e Avançar
                             </button>
@@ -1418,106 +2422,148 @@ export default function LeadsPage() {
             )}
 
             {/* ====================================================================
-                MODAL 4: FECHAMENTO + DADOS COMPLEMENTARES DO CLIENTE
+                MODAL 4: FECHAMENTO + SELEÇÃO DE PROPOSTA + DADOS DO CLIENTE
             ==================================================================== */}
-            {modalAtivo === 'fechado' && leadSelecionado && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 overflow-y-auto">
-                    <div className="bg-dark-card border border-dark-border rounded-3xl shadow-2xl p-6 w-full max-w-lg relative my-8">
-                        <button onClick={() => setModalAtivo(null)} className="absolute top-4 right-4 text-gray-400 hover:text-white"><X size={20} /></button>
-                        <h2 className="text-xl font-bold text-white mb-1 flex items-center gap-2">
-                            <CheckCircle className="text-emerald-400" /> Fechar Negócio & Dados do Cliente
-                        </h2>
-                        <p className="text-xs text-gray-400 mb-5">
-                            Confirme o valor fechado e preencha os dados complementares de <strong className="text-white">{leadSelecionado.nome}</strong>.
-                        </p>
+            {modalAtivo === 'fechado' && leadSelecionado && (() => {
+                const propsFechamento = obterListaPropostasLead(leadSelecionado);
 
-                        <form onSubmit={confirmarAvancoFechado} className="flex flex-col gap-4">
-                            <div className="bg-emerald-500/10 border border-emerald-500/20 p-3.5 rounded-2xl">
-                                <label className="block text-xs font-bold text-emerald-400 mb-1">Valor Fechado *</label>
-                                <input
-                                    required
-                                    type="text"
-                                    placeholder="R$ 0,00"
-                                    value={dadosFechamento.valorFechado}
-                                    onChange={e => setDadosFechamento({ ...dadosFechamento, valorFechado: formatarMoeda(e.target.value) })}
-                                    className="w-full bg-black/50 border border-emerald-500/30 rounded-lg p-3 text-emerald-400 text-lg font-bold outline-none focus:border-emerald-500"
-                                />
-                            </div>
+                return (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 overflow-y-auto">
+                        <div className="bg-dark-card border border-dark-border rounded-3xl shadow-2xl p-6 w-full max-w-lg relative my-8">
+                            <button onClick={() => setModalAtivo(null)} className="absolute top-4 right-4 text-gray-400 hover:text-white"><X size={20} /></button>
+                            <h2 className="text-xl font-bold text-white mb-1 flex items-center gap-2">
+                                <CheckCircle className="text-emerald-400" /> Fechar Negócio & Dados do Cliente
+                            </h2>
+                            <p className="text-xs text-gray-400 mb-5">
+                                Selecione a proposta aprovada e complete os dados cadastrais de <strong className="text-white">{leadSelecionado.nome}</strong>.
+                            </p>
 
-                            {clientesExistentes.length > 0 && (
-                                <div>
-                                    <label className="block text-xs text-gray-400 mb-1">Já é cliente cadastrado? (Opcional - Recompra)</label>
-                                    <select
-                                        value={dadosFechamento.clienteExistenteId}
-                                        onChange={e => handleSelecionarClienteNoModalFechamento(e.target.value)}
-                                        className="w-full bg-black/50 border border-white/10 rounded-lg p-2.5 text-xs text-gray-200 outline-none focus:border-emerald-500"
-                                    >
-                                        <option value="">Novo cliente (cadastrar agora)</option>
-                                        {clientesExistentes.map(c => (
-                                            <option key={c.id} value={c.id}>{c.nomeCompleto} — CPF: {c.cpf}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                            )}
+                            <form onSubmit={confirmarAvancoFechado} className="flex flex-col gap-4">
+                                {propsFechamento.length > 0 && (
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-300 mb-1.5">
+                                            Qual proposta o cliente fechou?
+                                        </label>
+                                        <div className="flex flex-col gap-2">
+                                            {propsFechamento.map((p) => (
+                                                <button
+                                                    key={p.id}
+                                                    type="button"
+                                                    onClick={() =>
+                                                        setDadosFechamento({
+                                                            ...dadosFechamento,
+                                                            propostaAprovadaId: p.id,
+                                                            valorFechado: p.valorCredito
+                                                        })
+                                                    }
+                                                    className={`p-3 rounded-xl border text-left transition-all flex items-center justify-between ${
+                                                        dadosFechamento.propostaAprovadaId === p.id
+                                                            ? 'bg-emerald-500/15 border-emerald-500 text-white'
+                                                            : 'bg-black/40 border-white/10 text-gray-400 hover:border-white/25'
+                                                    }`}
+                                                >
+                                                    <div>
+                                                        <span className="text-xs font-bold block">
+                                                            {p.titulo} (v{p.versao || 1})
+                                                        </span>
+                                                        <span className="text-[11px] text-gray-400">
+                                                            {p.valorParcela ? `Parcela: ${p.valorParcela}` : p.tipoCarta}
+                                                        </span>
+                                                    </div>
+                                                    <strong className="text-sm text-emerald-400">{p.valorCredito}</strong>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
 
-                            {dadosFechamento.clienteExistenteId && (
-                                <div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 rounded-lg font-bold">
-                                    <UserCheck size={15} /> Cliente existente vinculado (nova venda será somada ao cadastro atual).
-                                </div>
-                            )}
-
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <div className="sm:col-span-2">
-                                    <label className="block text-xs text-gray-400 mb-1">Nome Completo *</label>
+                                <div className="bg-emerald-500/10 border border-emerald-500/20 p-3.5 rounded-2xl">
+                                    <label className="block text-xs font-bold text-emerald-400 mb-1">Valor Fechado *</label>
                                     <input
                                         required
                                         type="text"
-                                        value={dadosFechamento.nomeCompleto}
-                                        onChange={e => setDadosFechamento({ ...dadosFechamento, nomeCompleto: e.target.value })}
-                                        className="w-full bg-black/50 border border-white/10 rounded-lg p-2.5 text-sm text-white outline-none focus:border-emerald-500"
+                                        placeholder="R$ 0,00"
+                                        value={dadosFechamento.valorFechado}
+                                        onChange={e => setDadosFechamento({ ...dadosFechamento, valorFechado: formatarMoeda(e.target.value) })}
+                                        className="w-full bg-black/50 border border-emerald-500/30 rounded-lg p-3 text-emerald-400 text-lg font-bold outline-none focus:border-emerald-500"
                                     />
                                 </div>
-                                <div>
-                                    <label className="block text-xs text-gray-400 mb-1">CPF *</label>
-                                    <input
-                                        required
-                                        type="text"
-                                        placeholder="000.000.000-00"
-                                        value={dadosFechamento.cpf}
-                                        onChange={e => handleCpfFechamentoChange(e.target.value)}
-                                        className="w-full bg-black/50 border border-white/10 rounded-lg p-2.5 text-sm text-white outline-none focus:border-emerald-500"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs text-gray-400 mb-1">Telefone *</label>
-                                    <input
-                                        required
-                                        type="text"
-                                        placeholder="(00) 00000-0000"
-                                        value={dadosFechamento.telefone}
-                                        onChange={e => setDadosFechamento({ ...dadosFechamento, telefone: formatarTelefone(e.target.value) })}
-                                        className="w-full bg-black/50 border border-white/10 rounded-lg p-2.5 text-sm text-white outline-none focus:border-emerald-500"
-                                    />
-                                </div>
-                                <div className="sm:col-span-2">
-                                    <label className="block text-xs text-gray-400 mb-1">Data de Nascimento *</label>
-                                    <input
-                                        required
-                                        type="date"
-                                        value={dadosFechamento.dataNascimento}
-                                        onChange={e => setDadosFechamento({ ...dadosFechamento, dataNascimento: e.target.value })}
-                                        className="w-full bg-black/50 border border-white/10 rounded-lg p-2.5 text-sm text-white outline-none focus:border-emerald-500"
-                                    />
-                                </div>
-                            </div>
 
-                            <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl mt-2 transition-colors">
-                                Salvar Dados e Mover para Fechados
-                            </button>
-                        </form>
+                                {clientesExistentes.length > 0 && (
+                                    <div>
+                                        <label className="block text-xs text-gray-400 mb-1">Já é cliente cadastrado? (Opcional - Recompra)</label>
+                                        <select
+                                            value={dadosFechamento.clienteExistenteId}
+                                            onChange={e => handleSelecionarClienteNoModalFechamento(e.target.value)}
+                                            className="w-full bg-black/50 border border-white/10 rounded-lg p-2.5 text-xs text-gray-200 outline-none focus:border-emerald-500"
+                                        >
+                                            <option value="">Novo cliente (cadastrar agora)</option>
+                                            {clientesExistentes.map(c => (
+                                                <option key={c.id} value={c.id}>{c.nomeCompleto} — CPF: {c.cpf}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
+
+                                {dadosFechamento.clienteExistenteId && (
+                                    <div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 rounded-lg font-bold">
+                                        <UserCheck size={15} /> Cliente existente vinculado (nova venda será somada ao cadastro atual).
+                                    </div>
+                                )}
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div className="sm:col-span-2">
+                                        <label className="block text-xs text-gray-400 mb-1">Nome Completo *</label>
+                                        <input
+                                            required
+                                            type="text"
+                                            value={dadosFechamento.nomeCompleto}
+                                            onChange={e => setDadosFechamento({ ...dadosFechamento, nomeCompleto: e.target.value })}
+                                            className="w-full bg-black/50 border border-white/10 rounded-lg p-2.5 text-sm text-white outline-none focus:border-emerald-500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-gray-400 mb-1">CPF *</label>
+                                        <input
+                                            required
+                                            type="text"
+                                            placeholder="000.000.000-00"
+                                            value={dadosFechamento.cpf}
+                                            onChange={e => handleCpfFechamentoChange(e.target.value)}
+                                            className="w-full bg-black/50 border border-white/10 rounded-lg p-2.5 text-sm text-white outline-none focus:border-emerald-500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-gray-400 mb-1">Telefone / WhatsApp *</label>
+                                        <input
+                                            required
+                                            type="text"
+                                            placeholder="(00) 00000-0000"
+                                            value={dadosFechamento.telefone}
+                                            onChange={e => setDadosFechamento({ ...dadosFechamento, telefone: formatarTelefone(e.target.value) })}
+                                            className="w-full bg-black/50 border border-white/10 rounded-lg p-2.5 text-sm text-white outline-none focus:border-emerald-500"
+                                        />
+                                    </div>
+                                    <div className="sm:col-span-2">
+                                        <label className="block text-xs text-gray-400 mb-1">Data de Nascimento *</label>
+                                        <input
+                                            required
+                                            type="date"
+                                            value={dadosFechamento.dataNascimento}
+                                            onChange={e => setDadosFechamento({ ...dadosFechamento, dataNascimento: e.target.value })}
+                                            className="w-full bg-black/50 border border-white/10 rounded-lg p-2.5 text-sm text-white outline-none focus:border-emerald-500"
+                                        />
+                                    </div>
+                                </div>
+
+                                <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl mt-2 transition-colors">
+                                    Salvar Dados e Mover para Fechados
+                                </button>
+                            </form>
+                        </div>
                     </div>
-                </div>
-            )}
+                );
+            })()}
 
             {/* ====================================================================
                 MODAL 5: CONVERSÃO FINAL (REGISTRAR VENDA & COMPETÊNCIA DA NOTA)
@@ -1535,7 +2581,6 @@ export default function LeadsPage() {
                         </p>
 
                         <form onSubmit={confirmarConversaoClienteEVenda} className="flex flex-col gap-5">
-                            {/* BLOCO 1: DADOS DO CLIENTE */}
                             <div className="bg-black/30 border border-white/5 p-4 rounded-2xl">
                                 <div className="flex justify-between items-center mb-3">
                                     <h3 className="text-xs font-black uppercase tracking-wider text-red-500">1. Dados do Cliente</h3>
@@ -1565,7 +2610,6 @@ export default function LeadsPage() {
                                 </div>
                             </div>
 
-                            {/* BLOCO 2: DADOS DA VENDA & COMPETÊNCIA DA NOTA */}
                             <div className="bg-black/30 border border-white/5 p-4 rounded-2xl">
                                 <h3 className="text-xs font-black uppercase tracking-wider text-emerald-400 mb-3">2. Registro da Venda & Comissionamento</h3>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
@@ -1617,7 +2661,6 @@ export default function LeadsPage() {
                                     </div>
                                 </div>
 
-                                {/* SELETOR DE FECHAMENTO DE NOTA (MÊS ATUAL VS PRÓXIMO MÊS) */}
                                 <div className="bg-black/40 border border-white/10 p-3.5 rounded-2xl">
                                     <label className="text-xs font-bold text-gray-300 mb-2 flex items-center gap-1.5">
                                         <Receipt size={14} className="text-amber-400" />
@@ -1660,7 +2703,6 @@ export default function LeadsPage() {
                                     </div>
                                 </div>
 
-                                {/* PRÉVIA DE COMISSÃO E 1º RECEBIMENTO */}
                                 {simulacaoPreview && (
                                     Number.isNaN(simulacaoPreview.valorComissaoTotal) ? (
                                         <div className="mt-3 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-400 font-medium">
@@ -1746,7 +2788,7 @@ export default function LeadsPage() {
 }
 
 // ============================================================================
-// 11. COMPONENTE DE COLUNA DO KANBAN
+// 12. COMPONENTE DE COLUNA DO KANBAN
 // ============================================================================
 function renderKanbanColumn(
     titulo,
@@ -1755,7 +2797,8 @@ function renderKanbanColumn(
     iniciarMovimentoLead,
     abrirModalConversao,
     abrirModalFollowUp,
-    editarLead,
+    abrirModalEditarLead,
+    abrirModalPropostasLead,
     excluirLead,
     dataHojeISO
 ) {
@@ -1792,6 +2835,14 @@ function renderKanbanColumn(
                             lead.status !== 'fechado' &&
                             lead.proximoFollowUpData === dataHojeISO;
 
+                        const listaProps = obterListaPropostasLead(lead);
+                        const resumoProps = calcularResumoPropostasLead(listaProps);
+                        const propDestaque =
+                            listaProps.find((p) => p.statusProposta === 'APROVADA') ||
+                            listaProps.find((p) => p.statusProposta === 'ATIVA') ||
+                            listaProps[0];
+                        const linkInsta = gerarLinkInstagram(lead.instagram);
+
                         return (
                             <div
                                 key={lead.id}
@@ -1805,6 +2856,13 @@ function renderKanbanColumn(
                             >
                                 <div className="absolute top-3 right-3 flex gap-1">
                                     <button
+                                        onClick={() => abrirModalPropostasLead(lead)}
+                                        title="Gerenciar Propostas & Parcelas"
+                                        className="p-1.5 text-purple-400 hover:text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 rounded-lg transition-colors"
+                                    >
+                                        <Layers size={13} />
+                                    </button>
+                                    <button
                                         onClick={() => abrirModalFollowUp(lead)}
                                         title="Registrar Follow-up / Última Conversa"
                                         className="p-1.5 text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 rounded-lg transition-colors"
@@ -1812,8 +2870,8 @@ function renderKanbanColumn(
                                         <MessageSquarePlus size={13} />
                                     </button>
                                     <button
-                                        onClick={() => editarLead(lead)}
-                                        title="Editar Nome"
+                                        onClick={() => abrirModalEditarLead(lead)}
+                                        title="Editar Dados do Lead"
                                         className="p-1.5 text-gray-500 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
                                     >
                                         <Edit2 size={12} />
@@ -1827,7 +2885,7 @@ function renderKanbanColumn(
                                     </button>
                                 </div>
 
-                                <div className="pr-20">
+                                <div className="pr-24">
                                     <h5 className="text-sm font-bold text-white leading-tight">{lead.nome}</h5>
                                     <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                                         <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-white/5 text-gray-300 border border-white/10">
@@ -1862,6 +2920,18 @@ function renderKanbanColumn(
                                             <Phone size={11} className="text-gray-500" /> {lead.telefone}
                                         </span>
                                     )}
+                                    {lead.instagram && (
+                                        <a
+                                            href={linkInsta}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            onClick={(e) => e.stopPropagation()}
+                                            className="inline-flex items-center gap-1.5 text-pink-400 hover:text-pink-300 font-semibold w-fit"
+                                        >
+                                            <InstagramIcon size={11} /> {formatarInstagram(lead.instagram)}
+                                            <ExternalLink size={10} />
+                                        </a>
+                                    )}
                                     <span className="flex items-center gap-1.5">
                                         <CalendarDays size={11} className="text-gray-500" /> Chegada: {formatarDataBR(lead.dataChegada)}
                                     </span>
@@ -1871,6 +2941,32 @@ function renderKanbanColumn(
                                         </span>
                                     )}
                                 </div>
+
+                                {listaProps.length > 0 && (
+                                    <div
+                                        onClick={() => abrirModalPropostasLead(lead)}
+                                        className="cursor-pointer bg-purple-500/10 hover:bg-purple-500/15 border border-purple-500/25 p-2.5 rounded-lg text-[11px] flex flex-col gap-1 transition-colors"
+                                    >
+                                        <div className="flex items-center justify-between gap-1">
+                                            <span className="font-bold text-purple-300">
+                                                {resumoProps.qtdTotal > 1
+                                                    ? `${resumoProps.qtdTotal} propostas (${resumoProps.qtdAtivas} ativas)`
+                                                    : `${propDestaque?.titulo || 'Proposta'} • v${propDestaque?.versao || 1}`}
+                                            </span>
+                                            <span className="text-[10px] text-purple-300 underline">Gerenciar</span>
+                                        </div>
+                                        <div className="flex flex-wrap items-center justify-between gap-1 text-gray-200">
+                                            <span>
+                                                Crédito: <strong className="text-white">{resumoProps.somaCreditoFormatado || propDestaque?.valorCredito}</strong>
+                                            </span>
+                                            {(resumoProps.somaParcelaFormatado || propDestaque?.valorParcela) && (
+                                                <span>
+                                                    Parc: <strong className="text-emerald-400">{resumoProps.somaParcelaFormatado || propDestaque?.valorParcela}</strong>
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
 
                                 {lead.ultimoFollowUpTexto && (
                                     <div
@@ -1912,9 +3008,12 @@ function renderKanbanColumn(
                                         </div>
                                     ) : (
                                         <>
-                                            <span className="text-xs font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded truncate">
-                                                {lead.status === 'proposta' && lead.valorNegociado
-                                                    ? `Proposta: ${lead.valorNegociado}`
+                                            <span
+                                                onClick={() => abrirModalPropostasLead(lead)}
+                                                className="cursor-pointer text-xs font-bold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-1 rounded truncate"
+                                            >
+                                                {resumoProps.somaCreditoFormatado
+                                                    ? `Proposta: ${resumoProps.somaCreditoFormatado}`
                                                     : lead.status === 'contato'
                                                         ? 'Em negociação'
                                                         : 'Novo Lead'}

@@ -1,17 +1,38 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Plus, Trash2, Percent, Calendar, Sparkles } from 'lucide-react';
-import { collection, addDoc, deleteDoc, doc } from 'firebase/firestore';
+import {
+  Settings,
+  Plus,
+  Trash2,
+  Percent,
+  Calendar,
+  Sparkles,
+  Star,
+  CheckCircle2
+} from 'lucide-react';
+import {
+  collection,
+  addDoc,
+  deleteDoc,
+  doc,
+  updateDoc
+} from 'firebase/firestore';
 import { toast } from 'react-hot-toast';
 import { db } from '../../config/firebase';
 import { useAuthStore } from '../../store/useAuthStore';
 import { PlanoComissao } from '../../types/models';
 import { buscarOuInicializarPlanos } from '../../utils/comissaoEngine';
 
+type PlanoComissaoEstendido = PlanoComissao & {
+  isPadrao?: boolean;
+};
+
 export default function ConfiguracoesPage() {
   const { user } = useAuthStore();
-  const [planos, setPlanos] = useState<PlanoComissao[]>([]);
-  const [carregando, setCarregando] = useState(true);
-  const [salvando, setSalvando] = useState(false);
+  const [planos, setPlanos] = useState<PlanoComissaoEstendido[]>([]);
+  const [planoPadraoId, setPlanoPadraoId] = useState<string>('');
+  const [salvandoPadrao, setSalvandoPadrao] = useState<boolean>(false);
+  const [carregando, setCarregando] = useState<boolean>(true);
+  const [salvando, setSalvando] = useState<boolean>(false);
 
   // Estados do formulário de novo plano
   const [nome, setNome] = useState('');
@@ -21,13 +42,86 @@ export default function ConfiguracoesPage() {
   const [percentualBonus, setPercentualBonus] = useState('');
   const [parcelaBonus, setParcelaBonus] = useState('15');
 
-  // Carrega os planos cadastrados pelo usuário
+  // Marca o plano escolhido como padrão na própria coleção 'planos_comissao' e no localStorage
+  const persistirPlanoPadrao = async (
+    novoPlanoId: string,
+    listaReferencia?: PlanoComissaoEstendido[],
+    exibirToast = true
+  ) => {
+    if (!user?.uid || !novoPlanoId) return;
+
+    setSalvandoPadrao(true);
+    setPlanoPadraoId(novoPlanoId);
+    localStorage.setItem(`plano_padrao_crm_${user.uid}`, novoPlanoId);
+
+    const baseLista = listaReferencia || planos;
+    setPlanos(
+      baseLista.map((p) => ({
+        ...p,
+        isPadrao: p.id === novoPlanoId
+      }))
+    );
+
+    try {
+      // Atualiza a flag isPadrao nos documentos da coleção planos_comissao
+      const atualizacoes = baseLista
+        .filter((p) => p.id && (p.id === novoPlanoId || p.isPadrao))
+        .map((p) =>
+          updateDoc(doc(db, 'planos_comissao', p.id!), {
+            isPadrao: p.id === novoPlanoId
+          })
+        );
+
+      await Promise.all(atualizacoes);
+
+      if (exibirToast) {
+        toast.success('Plano padrão atualizado para as previsões da Tela Inicial!');
+      }
+    } catch (error) {
+      // Mantém funcionando via localStorage caso a regra de update no Firestore esteja restrita
+      console.warn('Preferência salva localmente (verifique permissão de update em planos_comissao):', error);
+      if (exibirToast) {
+        toast.success('Plano padrão atualizado neste navegador!');
+      }
+    } finally {
+      setSalvandoPadrao(false);
+    }
+  };
+
+  // Carrega os planos cadastrados e identifica qual está definido como padrão
   const carregarPlanos = async () => {
     if (!user?.uid) return;
     setCarregando(true);
-    const lista = await buscarOuInicializarPlanos(user.uid);
-    setPlanos(lista);
-    setCarregando(false);
+
+    try {
+      const lista = (await buscarOuInicializarPlanos(user.uid)) as PlanoComissaoEstendido[];
+      setPlanos(lista);
+
+      // 1º: Verifica se algum plano no Firestore já está marcado com isPadrao: true
+      const marcadoNoBanco = lista.find((p) => p.isPadrao && p.id);
+      if (marcadoNoBanco?.id) {
+        setPlanoPadraoId(marcadoNoBanco.id);
+        localStorage.setItem(`plano_padrao_crm_${user.uid}`, marcadoNoBanco.id);
+        return;
+      }
+
+      // 2º: Verifica se há um ID válido salvo no localStorage
+      const idLocal = localStorage.getItem(`plano_padrao_crm_${user.uid}`) || '';
+      const validoLocal = lista.find((p) => p.id === idLocal);
+      if (validoLocal?.id) {
+        await persistirPlanoPadrao(validoLocal.id, lista, false);
+        return;
+      }
+
+      // 3º: Define automaticamente o primeiro plano da lista como padrão
+      if (lista.length > 0 && lista[0].id) {
+        await persistirPlanoPadrao(lista[0].id, lista, false);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar configurações:', error);
+    } finally {
+      setCarregando(false);
+    }
   };
 
   useEffect(() => {
@@ -62,9 +156,9 @@ export default function ConfiguracoesPage() {
         temBonus,
         percentualBonus: bonusNum,
         parcelaBonus: parcelaBonusNum,
+        isPadrao: planos.length === 0
       });
 
-      // Limpa os campos após salvar
       setNome('');
       setPercentualBase('');
       setParcelasBase('13');
@@ -91,6 +185,14 @@ export default function ConfiguracoesPage() {
     if (window.confirm('Deseja remover este modelo de comissionamento?')) {
       await deleteDoc(doc(db, 'planos_comissao', id));
       toast.success('Plano removido!');
+
+      if (id === planoPadraoId) {
+        const restantes = planos.filter((p) => p.id !== id);
+        if (restantes[0]?.id) {
+          await persistirPlanoPadrao(restantes[0].id, restantes, false);
+        }
+      }
+
       await carregarPlanos();
     }
   };
@@ -98,15 +200,55 @@ export default function ConfiguracoesPage() {
   const formatarMoeda = (val: number) =>
     (Number.isFinite(val) ? val : 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
+  const planoPadraoSelecionado = planos.find((p) => p.id === planoPadraoId);
+
   return (
-    <div className="p-4 md:p-8 animate-in fade-in duration-300">
-      <div className="mb-10">
+    <div className="w-full p-4 md:p-8 animate-in fade-in duration-300">
+      <div className="mb-8">
         <h1 className="text-3xl font-black text-white flex items-center gap-3">
           <Settings className="text-red-600" size={30} /> Configurações de <span className="text-red-600">Comissão</span>
         </h1>
         <p className="text-gray-400 mt-2">
-          Cadastre as tabelas de comissionamento disponíveis para selecionar no fechamento de cada venda.
+          Cadastre suas tabelas de comissionamento e defina qual regra será usada como padrão nas previsões da Tela Inicial.
         </p>
+      </div>
+
+      {/* BLOCO DE DESTAQUE: SELETOR DE COMISSÃO PADRÃO PARA O DASHBOARD */}
+      <div className="bg-dark-card border border-amber-500/30 rounded-2xl p-6 shadow-lg mb-8 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div>
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider text-amber-400 bg-amber-500/15 px-2.5 py-1 rounded-full mb-2">
+            <Star size={12} /> Previsão Assertiva no Dashboard
+          </span>
+          <h2 className="text-lg font-bold text-white">
+            Comissionamento Padrão Pré-Selecionado
+          </h2>
+          <p className="text-xs text-gray-400 mt-1">
+            Esta regra será aplicada automaticamente sobre o <strong className="text-gray-200">Dinheiro na Mesa</strong> para calcular seu potencial de comissão mensal na Tela Inicial.
+          </p>
+        </div>
+
+        <div className="w-full lg:w-96 shrink-0">
+          <label className="block text-[11px] font-bold text-gray-400 mb-1.5">
+            Regra Padrão Ativa {salvandoPadrao ? '(Salvando...)' : ''}
+          </label>
+          <select
+            disabled={carregando || salvandoPadrao || planos.length === 0}
+            value={planoPadraoId}
+            onChange={(e) => persistirPlanoPadrao(e.target.value, planos, true)}
+            className="w-full bg-black/60 border border-amber-500/40 rounded-xl px-4 py-3 text-sm text-white font-bold outline-none focus:border-amber-400 transition-colors"
+          >
+            {planos.map((plano) => (
+              <option key={plano.id} value={plano.id} className="bg-dark-bg">
+                {plano.nome} ({plano.percentualBase}% em {plano.parcelasBase}x)
+              </option>
+            ))}
+          </select>
+          {planoPadraoSelecionado && (
+            <p className="text-[11px] text-emerald-400 mt-1.5 flex items-center gap-1 font-medium">
+              <CheckCircle2 size={12} /> Ativo nas projeções: {planoPadraoSelecionado.nome}
+            </p>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
@@ -224,11 +366,16 @@ export default function ConfiguracoesPage() {
                   plano.temBonus && plano.percentualBonus
                     ? exemploCarta * (Number(plano.percentualBonus) / 100)
                     : 0;
+                const ehPadrao = plano.id === planoPadraoId;
 
                 return (
                   <div
                     key={plano.id}
-                    className="bg-black/40 border border-white/10 hover:border-red-500/40 p-5 rounded-2xl flex flex-col justify-between gap-4 relative group transition-all"
+                    className={`bg-black/40 border p-5 rounded-2xl flex flex-col justify-between gap-4 relative group transition-all ${
+                      ehPadrao
+                        ? 'border-amber-500/60 shadow-lg shadow-amber-500/5'
+                        : 'border-white/10 hover:border-red-500/40'
+                    }`}
                   >
                     <button
                       onClick={() => handleExcluirPlano(plano.id)}
@@ -239,7 +386,27 @@ export default function ConfiguracoesPage() {
                     </button>
 
                     <div>
-                      <h3 className="text-base font-bold text-white pr-8">{plano.nome}</h3>
+                      <div className="flex flex-wrap items-center gap-2 pr-8">
+                        <h3 className="text-base font-bold text-white">{plano.nome}</h3>
+                      </div>
+
+                      {/* Badge ou Botão de Plano Padrão */}
+                      <div className="mt-2">
+                        {ehPadrao ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2.5 py-0.5 rounded-full">
+                            <Star size={10} /> Padrão da Tela Inicial
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => plano.id && persistirPlanoPadrao(plano.id, planos, true)}
+                            className="inline-flex items-center gap-1 text-[11px] font-bold text-gray-400 hover:text-amber-300 bg-white/5 hover:bg-amber-500/15 border border-white/10 hover:border-amber-500/30 px-2.5 py-0.5 rounded-full transition-colors"
+                          >
+                            <Star size={10} /> Definir como Padrão
+                          </button>
+                        )}
+                      </div>
+
                       <div className="flex flex-wrap gap-2 mt-3">
                         <span className="inline-flex items-center gap-1 text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1 rounded-lg font-bold">
                           <Percent size={12} /> Base: {percBase}%

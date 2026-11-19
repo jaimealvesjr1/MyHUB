@@ -411,7 +411,7 @@ export default function FinancePage() {
   // 11. RENDERIZAÇÃO DA INTERFACE
   // ============================================================================
   return (
-    <div className="p-4 md:p-8 animate-in fade-in duration-300 max-w-[1600px] mx-auto">
+    <div className="p-4 md:p-8 animate-in fade-in duration-300 w-full">
       {/* CABEÇALHO PRINCIPAL */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
