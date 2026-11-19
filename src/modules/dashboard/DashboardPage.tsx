@@ -173,23 +173,60 @@ export default function DashboardPage() {
 
     // 0. Carrega o Plano de Comissão Padrão configurado pelo usuário
     if (user?.uid) {
-      try {
-        const planosDisponiveis = await buscarOuInicializarPlanos(user.uid);
-        const planoPadraoLocal = localStorage.getItem(`plano_padrao_crm_${user.uid}`) || '';
+      const qLeads = query(collection(db, 'leads'), where('responsavelId', '==', user.uid));
+      const qSimulacoes = query(collection(db, 'simulacoes'), where('userId', '==', user.uid));
 
-        const encontrado =
-          planosDisponiveis.find((p: any) => p.isPadrao) ||
-          planosDisponiveis.find((p) => p.id === planoPadraoLocal) ||
-          planosDisponiveis[0] ||
-          null;
+      const [snapLeads, snapSimulacoes] = await Promise.all([
+        getDocs(qLeads),
+        getDocs(qSimulacoes)
+      ]);
 
-        if (encontrado?.id) {
-          localStorage.setItem(`plano_padrao_crm_${user.uid}`, encontrado.id);
+      let emProposta = 0;
+      let qtdProposta = 0;
+      let emFechamento = 0;
+      let qtdFechamento = 0;
+      let pendentesFollow = 0;
+
+      // Soma as simulações marcadas como "Proposta Enviada"
+      snapSimulacoes.docs.forEach((docSnap) => {
+        const sim = docSnap.data();
+        if (sim.status === 'proposta_enviada') {
+          emProposta += Number(sim.credito || 0);
+          qtdProposta += 1;
         }
-        setPlanoPadrao(encontrado);
-      } catch (err) {
-        console.error('Erro ao buscar plano padrão:', err);
-      }
+      });
+
+      // Soma os leads que estão na coluna "Fechados" (aguardando registro oficial da venda)
+      snapLeads.docs.forEach((docSnap) => {
+        const lead = docSnap.data();
+
+        if (lead.status === 'fechado') {
+          emFechamento += moedaTextoParaNumero(lead.valorFechado || lead.valorNegociado);
+          qtdFechamento += 1;
+        }
+
+        if (lead.status !== 'fechado') {
+          const dataFollow = lead.proximoFollowUpData;
+          const dataRefParado = lead.ultimoFollowUpData || lead.dataChegada;
+          let paradoDias = 0;
+          if (dataRefParado) {
+            const dRef = new Date(`${dataRefParado}T00:00:00`);
+            paradoDias = Math.floor((hoje.getTime() - dRef.getTime()) / (1000 * 60 * 60 * 24));
+          }
+          if ((dataFollow && dataFollow <= hojeISO) || paradoDias >= 3) {
+            pendentesFollow++;
+          }
+        }
+      });
+
+      setFollowUpsPendentes(pendentesFollow);
+      setDinheiroNaMesa({
+        total: emProposta + emFechamento,
+        emProposta,
+        qtdProposta,
+        emFechamento,
+        qtdFechamento,
+      });
     }
 
     // 1. Leads (Follow-ups e Dinheiro na Mesa com suporte a múltiplas propostas)
@@ -645,7 +682,7 @@ export default function DashboardPage() {
             {carregando ? '-' : formatarValor(dinheiroNaMesa.total)}
           </p>
           <p className="text-[11px] text-gray-400">
-            {dinheiroNaMesa.qtdProposta} propostas • {dinheiroNaMesa.qtdFechamento} em fechamento
+            {dinheiroNaMesa.qtdProposta} propostas enviadas • {dinheiroNaMesa.qtdFechamento} na coluna fechados
           </p>
         </div>
       </div>

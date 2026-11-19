@@ -10,11 +10,12 @@ const DashboardModule = lazy(() => import('./modules/dashboard/DashboardPage'));
 const VendasModule = lazy(() => import('./modules/finance/FinancePage'));
 const ClientesModule = lazy(() => import('./modules/clientes/ClientesPage'));
 const ClienteDetalheModule = lazy(() => import('./modules/clientes/ClienteDetalhePage'));
+const SimulacoesModule = lazy(() => import('./modules/simulacoes/SimulacoesPage'));
 const AdminModule = lazy(() => import('./modules/admin/AdminPage'));
 const LeadsModule = lazy(() => import('./modules/leads/LeadsPage'));
 const ConfiguracoesModule = lazy(() => import('./modules/configuracoes/ConfiguracoesPage'));
 
-const APP_VERSION = '2.2 - Leads & Comissões';
+const APP_VERSION = '2.3 - Central de Simulações';
 
 export default function App() {
   const { user, isLoading, initializeAuth } = useAuthStore();
@@ -64,6 +65,7 @@ export default function App() {
             <Route path="/financeiro" element={<VendasModule />} />
             <Route path="/clientes" element={<ClientesModule />} />
             <Route path="/clientes/:id" element={<ClienteDetalheModule />} />
+            <Route path="/simulacoes" element={<SimulacoesModule />} />
             <Route path="/leads" element={<LeadsModule />} />
             <Route path="/configuracoes" element={<ConfiguracoesModule />} />
             <Route
